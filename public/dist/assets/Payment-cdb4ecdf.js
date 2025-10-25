@@ -1,0 +1,1 @@
+import{_ as e}from"./index-32d6148d.js";const n={},o=window.Vue.openBlock,c=window.Vue.createElementBlock;function t(r,a){return o(),c("h1",null,"This is an about page")}const _=e(n,[["render",t]]);export{_ as default};

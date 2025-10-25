@@ -1,0 +1,573 @@
+/*
+ * @description: Cloudflare 域名管理页面样式
+ * @author: Gemini
+ * @date: 2024-07-20
+ */
+
+/* :root 定义了CSS变量，方便全局统一修改颜色等样式 */
+:root {
+    --bs-primary: #0d6efd;
+    --bs-primary-rgb: 13,110,253;
+    --bs-success: #198754;
+    --bs-danger: #dc3545;
+    --bs-gray-100: #f8f9fa;
+    --bs-gray-200: #e9ecef;
+    --bs-gray-300: #dee2e6;
+    --bs-gray-400: #ced4da;
+    --bs-gray-500: #adb5bd;
+    --bs-gray-600: #6c757d;
+    --bs-gray-700: #495057;
+    --bs-gray-800: #343a40;
+    --bs-gray-900: #212529;
+}
+
+/* === 基础样式 === */
+body {
+    background-color: var(--bs-gray-100);
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1200px;
+    padding: 1.5rem;
+}
+
+/* === 导航栏样式 === */
+.navbar {
+    background-color: var(--bs-primary);
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+    padding: 1rem 0;
+}
+
+.navbar-brand {
+    color: white !important;
+    font-weight: 600;
+    font-size: 1.25rem;
+}
+
+/* === 卡片样式 === */
+.card {
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,.075);
+    margin-bottom: 1.5rem;
+    background-color: white;
+}
+
+.card-header {
+    background-color: white;
+    border-bottom: 1px solid var(--bs-gray-200);
+    padding: 1rem 1.25rem;
+}
+
+.card-title {
+    color: var(--bs-gray-800);
+    font-weight: 600;
+    margin: 0;
+}
+
+/* === 标签页样式 === */
+.nav-tabs {
+    border-bottom: none;
+    margin: 0;
+    padding: 0;
+}
+
+.nav-tabs .nav-link {
+    color: var(--bs-gray-600);
+    border: none;
+    padding: 0.75rem 1.25rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.nav-tabs .nav-link:hover {
+    color: var(--bs-primary);
+    border: none;
+    background-color: var(--bs-gray-100);
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--bs-primary);
+    border: none;
+    border-bottom: 2px solid var(--bs-primary);
+    background-color: white;
+}
+
+/* === 表格样式 === */
+.table {
+    margin-bottom: 0;
+}
+
+.table th {
+    background-color: var(--bs-gray-100);
+    border-bottom: 2px solid var(--bs-gray-200);
+    font-weight: 600;
+    color: var(--bs-gray-700);
+    padding: 1rem;
+}
+
+.table td {
+    padding: 1rem;
+    vertical-align: middle;
+    color: var(--bs-gray-700);
+}
+
+.table-hover tbody tr:hover {
+    background-color: var(--bs-gray-100);
+}
+
+/* === 状态标签样式 === */
+.status-badge {
+    padding: 0.5em 0.75em;
+    font-size: 0.875em;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.status-badge::before {
+    content: '';
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+}
+
+.status-badge.active {
+    background-color: #d1e7dd;
+    color: #0f5132;
+}
+
+.status-badge.active::before {
+    background-color: #0f5132;
+}
+
+.status-badge.inactive {
+    background-color: #f8d7da;
+    color: #842029;
+}
+
+.status-badge.inactive::before {
+    background-color: #842029;
+}
+
+/* === 按钮样式 === */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn-primary {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+}
+
+.btn-primary:hover {
+    background-color: #0b5ed7;
+    border-color: #0a58ca;
+}
+
+.btn-danger {
+    background-color: var(--bs-danger);
+    border-color: var(--bs-danger);
+}
+
+.btn-danger:hover {
+    background-color: #bb2d3b;
+    border-color: #b02a37;
+}
+
+.btn-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-sm {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: 0.375rem;
+}
+
+.btn i {
+    font-size: 0.875rem;
+}
+
+/* === 表单样式 === */
+.form-label {
+    font-weight: 500;
+    color: var(--bs-gray-700);
+    margin-bottom: 0.5rem;
+}
+
+.form-control, .form-select {
+    border-color: var(--bs-gray-300);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.25);
+}
+
+.form-check {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.form-check-input {
+    margin: 0;
+    cursor: pointer;
+}
+
+.form-check-label {
+    margin: 0;
+    cursor: pointer;
+}
+
+/* === 模态框样式 === */
+.modal-content {
+    border: none;
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+}
+
+.modal-header {
+    border-bottom: 1px solid var(--bs-gray-200);
+    padding: 1rem 1.5rem;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+/* === 加载与空状态样式 === */
+.spinner-border {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-width: 0.25rem;
+}
+
+.empty-state {
+    padding: 3rem 1rem;
+    text-align: center;
+    color: var(--bs-gray-600);
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    color: var(--bs-gray-300);
+}
+
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1050;
+}
+
+.loading-spinner {
+    width: 3rem;
+    height: 3rem;
+    border: 0.25rem solid #f3f3f3;
+    border-top: 0.25rem solid var(--bs-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* === 响应式样式（移动端） === */
+@media (max-width: 768px) {
+    .container {
+        padding: 0.75rem;
+    }
+
+    .navbar {
+        padding: 0.5rem 0;
+    }
+
+    .navbar-brand {
+        font-size: 1rem;
+    }
+
+    .card {
+        margin-bottom: 1rem;
+    }
+
+    .card-header {
+        padding: 0.75rem;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .card-title {
+        font-size: 1rem;
+        margin: 0;
+    }
+
+    /* 修复刷新按钮样式 */
+    .card-header .btn {
+        width: auto;
+        margin: 0;
+        padding: 0.375rem 0.75rem;
+        font-size: 0.875rem;
+    }
+
+    /* 修复状态标签样式 */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 0.25rem;
+        white-space: nowrap;
+    }
+
+    .status-badge.active {
+        background-color: #d1e7dd;
+        color: #0f5132;
+    }
+
+    .status-badge.inactive {
+        background-color: #f8d7da;
+        color: #842029;
+    }
+
+    /* 修复选择框样式 */
+    .form-select {
+        width: 100% !important;
+        margin: 0;
+        font-size: 0.875rem;
+        padding: 0.375rem 0.75rem;
+    }
+    
+    .nav-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    .nav-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-tabs .nav-link {
+        padding: 0.5rem 1rem;
+        white-space: nowrap;
+        font-size: 0.875rem;
+    }
+
+    /* 移动端表格卡片化 */
+    .table-responsive {
+        overflow: visible;
+    }
+
+    .table {
+        display: block;
+        min-width: auto;
+    }
+
+    .table thead {
+        display: none;
+    }
+
+    .table tbody {
+        display: block;
+        width: 100%;
+    }
+
+    .table tr {
+        display: block;
+        margin-bottom: 1rem;
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        padding: 0.75rem;
+    }
+
+    .table td {
+        display: block;
+        text-align: right;
+        padding: 0.5rem 0;
+        border: none;
+        position: relative;
+        min-width: auto;
+    }
+
+    .table td::before {
+        content: attr(data-label);
+        float: left;
+        font-weight: 600;
+        color: var(--bs-gray-600);
+        text-transform: uppercase;
+        font-size: 0.75rem;
+    }
+
+    .table td:last-child {
+        text-align: center;
+        padding-top: 1rem;
+        padding-bottom: 0;
+    }
+
+    .table .btn-group {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        flex-direction: row; /* 在卡片内部保持横向排列 */
+        width: 100%;
+    }
+
+    .table .btn {
+        flex: 1;
+        max-width: 120px;
+        margin-bottom: 0;
+        padding: 0.375rem 0.75rem;
+        font-size: 0.875rem;
+    }
+
+    /* 域名列表表格特殊处理 */
+    #zones-table tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem;
+    }
+
+    #zones-table td {
+        flex: 1;
+        text-align: left;
+        min-width: 0;
+        padding: 0.25rem 0.5rem;
+    }
+
+    #zones-table td:first-child {
+        flex: 2;
+    }
+
+    #zones-table td:last-child {
+        flex: 0 0 auto;
+        text-align: right;
+    }
+
+    #zones-table td::before {
+        display: none;
+    }
+    
+    /* 修复空状态显示 */
+    .empty-state {
+        padding: 2rem 1rem;
+        text-align: center;
+    }
+
+    .empty-state i {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        margin: 0;
+        font-size: 0.875rem;
+        color: var(--bs-gray-600);
+    }
+    
+    /* 模态框和表单 */
+    .modal-dialog {
+        margin: 0.5rem;
+        max-width: calc(100% - 1rem);
+    }
+
+    .modal-body {
+        padding: 1rem;
+    }
+
+    .row {
+        margin-left: -0.5rem;
+        margin-right: -0.5rem;
+    }
+
+    .col-md-6 {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    .mb-3 {
+        margin-bottom: 0.75rem !important;
+    }
+}
+
+/* 优化触摸体验 */
+@media (hover: none) {
+    .btn:active {
+        transform: scale(0.98);
+    }
+
+    .table-hover tbody tr:active {
+        background-color: var(--bs-gray-100);
+    }
+
+    .nav-tabs .nav-link:active {
+        background-color: var(--bs-gray-100);
+    }
+}
+
+/* 优化表单在移动端的显示 */
+@media (max-width: 768px) {
+    .row {
+        margin-left: -0.5rem;
+        margin-right: -0.5rem;
+    }
+
+    .col-md-6 {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    .mb-3 {
+        margin-bottom: 0.75rem !important;
+    }
+
+    .form-check {
+        margin-top: 0.5rem;
+    }
+}
+
+/* 优化模态框在移动端的显示 */
+@media (max-width: 768px) {
+    .modal-content {
+        border-radius: 0.5rem;
+    }
+
+    .modal-header {
+        padding: 0.75rem;
+    }
+
+    .modal-title {
+        font-size: 1rem;
+    }
+
+    .btn-close {
+        padding: 0.5rem;
+        margin: -0.5rem;
+    }
+}

@@ -1,0 +1,5 @@
+node_modules 
+unpackage
+*.zip 过滤所有.zip文件
+.env
+ 

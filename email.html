@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>邮件发送系统 - 群发数组处理</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style>
+    .form-section {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+    }
+    .status-alert { margin-top: 15px; }
+    .loading { margin: 20px 0; }
+    textarea { resize: vertical; min-height: 100px; }
+    pre { white-space: pre-wrap; word-wrap: break-word; }
+  </style>
+</head>
+<body class="container mt-5">
+  <div id="app" class="row justify-content-center">
+  {{batchRecipientsText}}
+    <div class="col-md-10">
+      <h2 class="text-center mb-4">邮件发送系统</h2>
+      
+      <!-- 状态提示 -->
+      <div class="alert alert-success status-alert" v-if="successMsg" role="alert">{{ successMsg }}</div>
+      <div class="alert alert-danger status-alert" v-if="errorMsg" role="alert">{{ errorMsg }}</div>
+      <div class="loading text-center" v-if="isLoading">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2">邮件发送中，请稍候...</p>
+      </div>
+
+      <form @submit.prevent="handleSubmit">
+        <!-- 1. SMTP配置 -->
+        <div class="form-section">
+          <h5 class="mb-3 text-primary">SMTP服务器配置 <small class="text-muted">(必填)</small></h5>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label for="smtpHost" class="form-label">SMTP服务器地址</label>
+              <input type="text" class="form-control" id="smtpHost" 
+                     v-model="smtpConfig.host" placeholder="例如：smtp.163.com" required>
+            </div>
+            <div class="col-md-3">
+              <label for="smtpPort" class="form-label">端口</label>
+              <input type="number" class="form-control" id="smtpPort" 
+                     v-model.number="smtpConfig.port" placeholder="例如：465" required>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="smtpSecure" v-model="smtpConfig.secure">
+                <label class="form-check-label" for="smtpSecure">启用SSL加密</label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label for="smtpUser" class="form-label">发件人邮箱账号</label>
+              <input type="email" class="form-control" id="smtpUser" 
+                     v-model="smtpConfig.user" placeholder="例如：your-email@163.com" required>
+            </div>
+            <div class="col-md-6">
+              <label for="smtpPass" class="form-label">SMTP授权码</label>
+              <input type="password" class="form-control" id="smtpPass" 
+                     v-model="smtpConfig.pass" placeholder="非邮箱登录密码" required>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 发件人信息 -->
+        <div class="form-section">
+          <h5 class="mb-3 text-primary">发件人信息 <small class="text-muted">(必填)</small></h5>
+          <div class="row g-3">
+            <div class="col-12">
+              <label for="from" class="form-label">发件人标识</label>
+              <input type="text" class="form-control" id="from" 
+                     v-model="from" placeholder='格式："名称" &lt;邮箱&gt; 例如："公司名称" &lt;your-email@163.com&gt;' required>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 邮件内容 -->
+        <div class="form-section">
+          <h5 class="mb-3 text-primary">邮件内容 <small class="text-muted">(必填)</small></h5>
+          <div class="row g-3">
+            <div class="col-12">
+              <label for="subject" class="form-label">邮件主题</label>
+              <input type="text" class="form-control" id="subject" 
+                     v-model="subject" :placeholder="placeholderMessage" required>
+              <div class="form-text">群发时{{to}}会自动替换为收件人邮箱</div>
+            </div>
+            <div class="col-12">
+              <label for="text" class="form-label">纯文本内容 <small class="text-muted">(可选)</small></label>
+              <textarea class="form-control" id="text" 
+                        v-model="text" placeholder="例如：您好{{to}}，这是纯文本内容..."></textarea>
+            </div>
+            <div class="col-12">
+              <label for="html" class="form-label">HTML内容 <small class="text-muted">(可选)</small></label>
+              <textarea class="form-control" id="html" 
+                        v-model="html" placeholder="例如：&lt;h1&gt;您好{{to}}，这是HTML内容&lt;/h1&gt;"></textarea>
+              <div class="form-text">提示：至少填写纯文本或HTML内容中的一项</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 发送模式（明确数组处理） -->
+        <div class="form-section">
+          <h5 class="mb-3 text-primary">发送模式</h5>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="sendMode" 
+                       id="singleMode" value="1" v-model="sendMode">
+                <label class="form-check-label" for="singleMode">单发</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="sendMode" 
+                       id="batchMode" value="2" v-model="sendMode">
+                <label class="form-check-label" for="batchMode">群发</label>
+              </div>
+            </div>
+            
+            <!-- 单发收件人 -->
+            <div class="col-12" v-if="sendMode === '1'">
+              <label for="to" class="form-label">收件人邮箱</label>
+              <input type="email" class="form-control" id="to" 
+                     v-model="to" placeholder="例如：recipient@qq.com" required>
+            </div>
+
+            <!-- 群发收件人（前端输入转数组） -->
+            <div class="col-12" v-if="sendMode === '2'">
+              <label for="batchRecipients" class="form-label">群发收件人列表</label>
+              <textarea class="form-control" id="batchRecipients" 
+                        v-model="batchRecipientsText" 
+                        placeholder="请输入收件人邮箱，每行一个（例如：&#10;user1@qq.com&#10;user2@163.com）" 
+                        required></textarea>
+              <div class="form-text">
+                已解析有效邮箱（数组形式）：{{ validRecipients.length }} 个
+                <span v-if="validRecipients.length > 0" class="text-muted">
+                  （示例：{{ validRecipients[0] }}...）
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 发送按钮 -->
+        <div class="text-center mb-5">
+          <button type="submit" class="btn btn-primary btn-lg">发送邮件</button>
+        </div>
+      </form>
+
+      <!-- 发送结果详情 -->
+      <div class="mt-5" v-if="showResult">
+        <h5 class="text-primary">发送结果</h5>
+        <pre class="bg-light p-3 rounded">{{ resultJson }}</pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const { createApp, ref, reactive, watch } = Vue;
+
+    createApp({
+      setup() {
+      const placeholderMessage =ref('例如：尊敬的用户，您有新消息')
+        // 响应式数据
+        const smtpConfig = reactive({
+          host: 'smtp.163.com',
+          port: 465,
+          secure: true,
+          user: 'oppo7894@163.com',
+          pass: 'RLbv8QDpmmYJKqBs'
+        });
+        const to = ref('624331767@qq.com'); // 单发收件人
+        const from = ref('"Node API" <oppo7894@163.com>');
+        const subject = ref(`尊敬的用户，欢迎使用我们的服务`);
+        const text = ref('您好，这是一封测试邮件的纯文本内容。');
+        const html = ref('<h3>您好</h3><p>这是一封测试邮件的HTML内容。</p>');
+        const sendMode = ref('1'); // 1:单发 2:群发
+
+        const batchRecipientsText = ref('624331767@qq.com 464635146@qq.com'); // 群发收件人（多行文本输入）
+        const validRecipients = ref([]); // 核心：存储转换后的收件人数组
+
+        // 状态管理
+        const isLoading = ref(false);
+        const successMsg = ref('');
+        const errorMsg = ref('');
+        const resultJson = ref('');
+        const showResult = ref(false);
+
+        // 验证邮箱格式
+        const isValidEmail = (email) => {
+          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        };
+
+        // 监听多行文本变化，实时转换为数组（核心逻辑）
+        watch(batchRecipientsText, (newText) => {
+          if (!newText) {
+            validRecipients.value = [];
+            return;
+          }
+          // 转换逻辑：多行文本 → 数组 → 去重 → 验证格式
+          const recipientsArray = newText
+            .split('\n') // 按行分割为数组
+            .map(email => email.trim()) // 去除空格
+            .filter(email => email) // 过滤空行
+            .filter(email => isValidEmail(email)); // 过滤无效邮箱
+          // 数组去重
+          validRecipients.value = [...new Set(recipientsArray)];
+        });
+
+        // 表单提交处理
+        const handleSubmit = async () => {
+          // 重置状态
+          successMsg.value = '';
+          errorMsg.value = '';
+          showResult.value = false;
+
+          // 基础验证
+          if (!text.value && !html.value) {
+            errorMsg.value = '请至少填写纯文本内容或HTML内容中的一项';
+            return;
+          }
+          if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.user || !smtpConfig.pass) {
+            errorMsg.value = '请完善SMTP服务器配置信息';
+            return;
+          }
+          if (!from.value) {
+            errorMsg.value = '请填写发件人标识';
+            return;
+          }
+          if (!subject.value) {
+            errorMsg.value = '请填写邮件主题';
+            return;
+          }
+
+          // 构建请求数据
+          const requestData = {
+            smtpConfig: { ...smtpConfig },
+            from: from.value,
+            subject: subject.value,
+            text: text.value || undefined,
+            html: html.value || undefined,
+            status: Number(sendMode.value)
+          };
+console.log(subject.value);
+
+          // 单发模式
+          if (sendMode.value === '1') {
+            if (!to.value.trim() || !isValidEmail(to.value.trim())) {
+              errorMsg.value = '请填写有效的收件人邮箱';
+              return;
+            }
+            requestData.to = to.value.trim();
+          } 
+          // 群发模式（传递数组）
+          else {
+            if (validRecipients.value.length === 0) {
+              errorMsg.value = '群发模式必须填写至少一个有效的收件人邮箱';
+              return;
+            }
+            // 核心：将数组传给后端
+            requestData.batchRecipients = validRecipients.value;
+          }
+
+          // 发送请求
+          isLoading.value = true;
+          try {
+            const response = await axios.post('/api/send-email', requestData, {
+              headers: { 'Content-Type': 'application/json' }
+            });
+            successMsg.value = response.data.message;
+            resultJson.value = JSON.stringify(response.data, null, 2);
+            showResult.value = true;
+          } catch (err) {
+            errorMsg.value = err.response?.data?.detail || '发送失败，请检查配置';
+          } finally {
+            isLoading.value = false;
+          }
+        };
+
+        return {
+          smtpConfig,
+          from,
+          subject,
+          text,
+          html,
+          sendMode,
+          to,
+          batchRecipientsText, // 多行文本输入
+          validRecipients,     // 转换后的数组（供显示和提交）
+          isLoading,
+          successMsg,
+          errorMsg,
+          resultJson,
+          showResult,
+          handleSubmit,
+          placeholderMessage
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

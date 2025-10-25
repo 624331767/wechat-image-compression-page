@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API接口文档</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #1976d2;
+            --success-color: #2e7d32;
+            --warning-color: #f57c00;
+            --danger-color: #c62828;
+            --text-color: #333;
+            --bg-color: #f5f5f5;
+            --card-bg: #ffffff;
+            --border-color: #e0e0e0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background: var(--bg-color);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid var(--border-color);
+            text-align: center;
+        }
+
+        h2 {
+            color: var(--primary-color);
+            font-size: 1.8em;
+            margin: 40px 0 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .endpoint {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 25px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .endpoint:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .method {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-weight: 500;
+            font-size: 0.9em;
+            margin-right: 15px;
+            text-transform: uppercase;
+        }
+
+        .get { background: #e3f2fd; color: var(--primary-color); }
+        .post { background: #e8f5e9; color: var(--success-color); }
+        .put { background: #fff3e0; color: var(--warning-color); }
+        .delete { background: #ffebee; color: var(--danger-color); }
+
+        .url {
+            font-family: 'Fira Code', monospace;
+            background: #f8f9fa;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 1.1em;
+            color: #2c3e50;
+        }
+
+        .params {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .param {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .required {
+            color: var(--danger-color);
+            font-weight: 500;
+            margin-right: 8px;
+        }
+
+        .optional {
+            color: #666;
+            margin-right: 8px;
+        }
+
+        .debug-section {
+            margin-top: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .debug-section h3 {
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .param-input {
+            margin: 15px 0;
+        }
+
+        .param-input label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+
+        .param-input input, 
+        .param-input textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .param-input input:focus, 
+        .param-input textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+        }
+
+        .send-button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .send-button:hover {
+            background: #1565c0;
+        }
+
+        .response-area {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 4px;
+            min-height: 100px;
+            border: 1px solid var(--border-color);
+        }
+
+        .response-area pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Fira Code', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .error-message {
+            color: var(--danger-color);
+            margin-top: 10px;
+            padding: 10px;
+            background: #ffebee;
+            border-radius: 4px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .success-message {
+            color: var(--success-color);
+            padding: 10px;
+            background: #e8f5e9;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>API接口文档</h1>
+
+    <h2>用户相关接口</h2>
+    <div class="endpoint">
+        <div class="method get">GET</div>
+        <div class="url">/api/users</div>
+        <p>获取用户列表</p>
+        <div class="response">
+            <p>响应示例：</p>
+            <pre>{
+    "code": 200,
+    "data": [...]
+}</pre>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <button class="send-button" onclick="sendRequest('GET', '/api/users')">发送请求</button>
+            <div class="response-area">
+                <pre id="response-users"></pre>
+            </div>
+        </div>
+    </div>
+
+    <h2>文件上传接口</h2>
+    <div class="endpoint">
+        <div class="method post">POST</div>
+        <div class="url">/api/upload</div>
+        <p>上传文件</p>
+        <div class="params">
+            <div class="param">
+                <span class="required">image</span> - 文件对象（必填）
+            </div>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <div class="param-input">
+                <label>选择文件：</label>
+                <input type="file" id="file-upload">
+            </div>
+            <button class="send-button" onclick="uploadFile()">上传文件</button>
+            <div class="response-area">
+                <pre id="response-upload"></pre>
+            </div>
+        </div>
+    </div>
+
+    <h2>统计接口</h2>
+    <div class="endpoint">
+        <div class="method get">GET</div>
+        <div class="url">/api/statistics</div>
+        <p>获取统计数据</p>
+        <div class="response">
+            <p>响应示例：</p>
+            <pre>{
+    "code": 200,
+    "data": {...}
+}</pre>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <button class="send-button" onclick="sendRequest('GET', '/api/statistics')">发送请求</button>
+            <div class="response-area">
+                <pre id="response-statistics"></pre>
+            </div>
+        </div>
+    </div>
+
+    <h2>Cloudflare DNS管理接口</h2>
+    <div class="endpoint">
+        <div class="method get">GET</div>
+        <div class="url">/api-dns/zones</div>
+        <p>获取所有域名区域</p>
+        <div class="response">
+            <p>响应示例：</p>
+            <pre>{
+    "code": 200,
+    "message": "获取 Zone 成功",
+    "data": [...]
+}</pre>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <button class="send-button" onclick="sendRequest('GET', '/api-dns/zones')">发送请求</button>
+            <div class="response-area">
+                <pre id="response-zones"></pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <div class="method get">GET</div>
+        <div class="url">/api-dns/dns-records</div>
+        <p>获取DNS记录</p>
+        <div class="params">
+            <div class="param">
+                <span class="required">zoneId</span> - 域名区域ID（必填）
+            </div>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <div class="param-input">
+                <label>zoneId：</label>
+                <input type="text" id="zoneId" placeholder="请输入域名区域ID">
+            </div>
+            <button class="send-button" onclick="sendRequest('GET', '/api-dns/dns-records?zoneId=' + document.getElementById('zoneId').value)">发送请求</button>
+            <div class="response-area">
+                <pre id="response-dns-records"></pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <div class="method post">POST</div>
+        <div class="url">/api-dns/dns-records</div>
+        <p>添加DNS记录</p>
+        <div class="params">
+            <div class="param">
+                <span class="required">zoneId</span> - 域名区域ID（必填）
+            </div>
+            <div class="param">
+                <span class="required">type</span> - 记录类型（必填）
+            </div>
+            <div class="param">
+                <span class="required">name</span> - 记录名称（必填）
+            </div>
+            <div class="param">
+                <span class="required">content</span> - 记录内容（必填）
+            </div>
+            <div class="param">
+                <span class="required">ttl</span> - TTL值（必填）
+            </div>
+            <div class="param">
+                <span class="required">proxied</span> - 是否启用代理（必填，布尔值）
+            </div>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <div class="param-input">
+                <label>zoneId：</label>
+                <input type="text" id="add-zoneId" placeholder="请输入域名区域ID">
+            </div>
+            <div class="param-input">
+                <label>type：</label>
+                <input type="text" id="add-type" placeholder="请输入记录类型">
+            </div>
+            <div class="param-input">
+                <label>name：</label>
+                <input type="text" id="add-name" placeholder="请输入记录名称">
+            </div>
+            <div class="param-input">
+                <label>content：</label>
+                <input type="text" id="add-content" placeholder="请输入记录内容">
+            </div>
+            <div class="param-input">
+                <label>ttl：</label>
+                <input type="number" id="add-ttl" placeholder="请输入TTL值">
+            </div>
+            <div class="param-input">
+                <label>proxied：</label>
+                <input type="checkbox" id="add-proxied">
+            </div>
+            <button class="send-button" onclick="addDnsRecord()">发送请求</button>
+            <div class="response-area">
+                <pre id="response-add-dns"></pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <div class="method put">PUT</div>
+        <div class="url">/api-dns/dns-records</div>
+        <p>更新DNS记录</p>
+        <div class="params">
+            <div class="param">
+                <span class="required">zoneId</span> - 域名区域ID（必填）
+            </div>
+            <div class="param">
+                <span class="required">recordId</span> - 记录ID（必填）
+            </div>
+            <div class="param">
+                <span class="required">type</span> - 记录类型（必填）
+            </div>
+            <div class="param">
+                <span class="required">name</span> - 记录名称（必填）
+            </div>
+            <div class="param">
+                <span class="required">content</span> - 记录内容（必填）
+            </div>
+            <div class="param">
+                <span class="required">ttl</span> - TTL值（必填）
+            </div>
+            <div class="param">
+                <span class="required">proxied</span> - 是否启用代理（必填，布尔值）
+            </div>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <div class="param-input">
+                <label>zoneId：</label>
+                <input type="text" id="update-zoneId" placeholder="请输入域名区域ID">
+            </div>
+            <div class="param-input">
+                <label>recordId：</label>
+                <input type="text" id="update-recordId" placeholder="请输入记录ID">
+            </div>
+            <div class="param-input">
+                <label>type：</label>
+                <input type="text" id="update-type" placeholder="请输入记录类型">
+            </div>
+            <div class="param-input">
+                <label>name：</label>
+                <input type="text" id="update-name" placeholder="请输入记录名称">
+            </div>
+            <div class="param-input">
+                <label>content：</label>
+                <input type="text" id="update-content" placeholder="请输入记录内容">
+            </div>
+            <div class="param-input">
+                <label>ttl：</label>
+                <input type="number" id="update-ttl" placeholder="请输入TTL值">
+            </div>
+            <div class="param-input">
+                <label>proxied：</label>
+                <input type="checkbox" id="update-proxied">
+            </div>
+            <button class="send-button" onclick="updateDnsRecord()">发送请求</button>
+            <div class="response-area">
+                <pre id="response-update-dns"></pre>
+            </div>
+        </div>
+    </div>
+
+    <h2>AI查询接口</h2>
+    <div class="endpoint">
+        <div class="method post">POST</div>
+        <div class="url">/al/query</div>
+        <p>AI智能查询</p>
+        <div class="params">
+            <div class="param">
+                <span class="required">question</span> - 查询问题（必填）
+            </div>
+        </div>
+        <div class="debug-section">
+            <h3>在线调试</h3>
+            <div class="param-input">
+                <label>question：</label>
+                <textarea id="question" placeholder="请输入查询问题" rows="3"></textarea>
+            </div>
+            <button class="send-button" onclick="sendAiQuery()">发送请求</button>
+            <div class="response-area">
+                <pre id="response-ai-query"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function sendRequest(method, url, body = null) {
+            try {
+                const options = {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+                
+                if (body) {
+                    options.body = JSON.stringify(body);
+                }
+
+                const response = await fetch(url, options);
+                const data = await response.json();
+                
+                // 根据URL找到对应的响应区域
+                const responseId = url.split('/').pop();
+                const responseElement = document.getElementById(`response-${responseId}`);
+                if (responseElement) {
+                    responseElement.textContent = JSON.stringify(data, null, 2);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                const responseElement = document.getElementById(`response-${url.split('/').pop()}`);
+                if (responseElement) {
+                    responseElement.textContent = `错误: ${error.message}`;
+                }
+            }
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('file-upload');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                document.getElementById('response-upload').textContent = '请选择文件';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                document.getElementById('response-upload').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('response-upload').textContent = `错误: ${error.message}`;
+            }
+        }
+
+        async function addDnsRecord() {
+            const zoneId = document.getElementById('add-zoneId').value;
+            const type = document.getElementById('add-type').value;
+            const name = document.getElementById('add-name').value;
+            const content = document.getElementById('add-content').value;
+            const ttl = document.getElementById('add-ttl').value;
+            const proxied = document.getElementById('add-proxied').checked;
+
+            if (!zoneId || !type || !name || !content || !ttl) {
+                document.getElementById('response-add-dns').textContent = '请填写所有必填字段';
+                return;
+            }
+
+            const body = {
+                zoneId,
+                type,
+                name,
+                content,
+                ttl: parseInt(ttl),
+                proxied
+            };
+
+            await sendRequest('POST', '/api-dns/dns-records', body);
+        }
+
+        async function updateDnsRecord() {
+            const zoneId = document.getElementById('update-zoneId').value;
+            const recordId = document.getElementById('update-recordId').value;
+            const type = document.getElementById('update-type').value;
+            const name = document.getElementById('update-name').value;
+            const content = document.getElementById('update-content').value;
+            const ttl = document.getElementById('update-ttl').value;
+            const proxied = document.getElementById('update-proxied').checked;
+
+            if (!zoneId || !recordId || !type || !name || !content || !ttl) {
+                document.getElementById('response-update-dns').textContent = '请填写所有必填字段';
+                return;
+            }
+
+            const body = {
+                zoneId,
+                recordId,
+                type,
+                name,
+                content,
+                ttl: parseInt(ttl),
+                proxied
+            };
+
+            await sendRequest('PUT', '/api-dns/dns-records', body);
+        }
+
+        async function sendAiQuery() {
+            const question = document.getElementById('question').value;
+            
+            if (!question) {
+                document.getElementById('response-ai-query').textContent = '请输入查询问题';
+                return;
+            }
+
+            await sendRequest('POST', '/al/query', { question });
+        }
+    </script>
+</body>
+</html> 

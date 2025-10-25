@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>在线支付</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- 引入依赖 -->
+    <script src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/vue/3.2.31/vue.global.min.js"></script>
+    <script src="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-M/axios/0.26.0/axios.min.js"></script>
+    <script src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/dayjs/1.10.8/dayjs.min.js"></script>
+
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Helvetica Neue", sans-serif;
+        background: #f8f9fa;
+        padding: 20px;
+        margin: 0;
+      }
+
+      .container {
+        max-width: 420px;
+        margin: 40px auto;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 30px 24px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+      }
+
+      h2 {
+        text-align: center;
+        margin-bottom: 30px;
+        color: #333;
+      }
+
+      .section {
+        margin-bottom: 25px;
+      }
+
+      .label {
+        font-weight: 600;
+        font-size: 15px;
+        margin-bottom: 10px;
+        color: #555;
+        display: block;
+      }
+
+      .button-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .pay-btn {
+        flex: 1 1 48%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: #fff;
+        border: 2px solid #ccc;
+        border-radius: 12px;
+        padding: 12px;
+        font-size: 15px;
+        cursor: pointer;
+        transition: 0.3s;
+      }
+
+      .pay-btn.active {
+        border-color: #409eff;
+        background: #e6f4ff;
+        color: #007bff;
+      }
+
+      .amount-btn {
+        flex: 1 1 30%;
+        text-align: center;
+        padding: 12px 0;
+        background: #fff;
+        border: 2px solid #ccc;
+        border-radius: 12px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: 0.3s;
+      }
+
+      .amount-btn.active {
+        background: #28a745;
+        border-color: #28a745;
+        color: #fff;
+      }
+
+      .submit-btn {
+        width: 100%;
+        padding: 16px;
+        font-size: 18px;
+        background: linear-gradient(135deg, #ff7e5f, #fd3a69);
+        color: white;
+        border: none;
+        border-radius: 14px;
+        cursor: pointer;
+        transition: 0.3s;
+      }
+
+      .submit-btn:hover {
+        opacity: 0.9;
+      }
+
+      .pay-icon {
+        font-size: 20px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="app">
+      <div class="container">
+        <h2>请选择支付方式</h2>
+
+        <div class="section">
+          <span class="label">支付方式</span>
+          <div class="button-group">
+            <button
+              class="pay-btn"
+              :class="{ active: payType === 'alipay' }"
+              @click="payType = 'alipay'"
+            >
+              <span class="pay-icon">💙</span> 支付宝
+            </button>
+            <button
+              class="pay-btn"
+              :class="{ active: payType === 'wxpay' }"
+              @click="payType = 'wxpay'"
+            >
+              <span class="pay-icon">💚</span> 微信支付
+            </button>
+          </div>
+        </div>
+
+        <div class="section">
+          <span class="label">选择金额</span>
+          <div class="button-group">
+            <button
+              class="amount-btn"
+              v-for="amt in amounts"
+              :key="amt"
+              :class="{ active: payAmount === amt }"
+              @click="payAmount = amt"
+            >
+              {{ amt.toFixed(2) }} 元
+            </button>
+          </div>
+        </div>
+
+        <button class="submit-btn" @click="submitPay">立即支付</button>
+      </div>
+    </div>
+
+    <script>
+      const { createApp, ref } = Vue;
+      const key = "f8366ab4f9695004e22d72fb8059ae3a";
+
+      createApp({
+        setup() {
+          const payType = ref("alipay");
+          const payAmount = ref(null);
+          const amounts = ref([0.01, 0.05, 0.1, 0.15, 0.2, 0.25]);
+
+          async function submitPay() {
+            if (!payAmount.value) {
+              alert("请先选择金额！");
+              return;
+            }
+
+            const params = {
+              type: payType.value,
+              notify_url: "https://www.baidu.com",
+              return_url: window.location.href,
+              name: "测试商品",
+              money: payAmount.value.toFixed(2),
+              clientip: "192.168.101.238",
+              device: "pc",
+              param: "",
+            };
+
+            const response = await axios.post("/api-pay/pay-add", {
+              ...params,
+            });
+
+            if (response.data.code === 200) {
+              window.location.href = response.data.data.payurl;
+            } else {
+              alert(response.data.message);
+            }
+          }
+
+          return {
+            payType,
+            payAmount,
+            amounts,
+            submitPay,
+          };
+        },
+      }).mount("#app");
+    </script>
+  </body>
+</html>

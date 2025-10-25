@@ -1,0 +1,14 @@
+
+
+# render.yaml
+services:
+  - type: web
+    name: wechat-image-compression
+    env: node
+    branch: master   # 或者你的默认分支名，比如 main
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    plan: free
+    envVars:
+      - key: NODE_VERSION
+        value: "22.16.0"

@@ -1,0 +1,35 @@
+/* 全局样式初始化 */
+ 
+/* 重置标签的默认样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+   
+  /* 设置全局字体样式 */
+  body {
+    font-family: Arial, sans-serif;
+  }
+   
+  /* 移除链接的默认下划线样式 */
+  a {
+    text-decoration: none;
+  }
+   
+  /* 设置默认文本和背景颜色 */
+  body {
+    color: #333;
+    background-color: #fff;
+  }
+   
+  /* 设置默认边框样式 */
+  input, textarea, button {
+    border: none;
+  }
+   
+  /* 设置列表样式 */
+  ul, ol {
+    list-style: none;
+  }
+   
