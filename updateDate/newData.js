@@ -81,4 +81,4 @@ function apiLoggerMiddleware(req, res, next) {
     next(); // 执行下一个中间件或路由处理
 }
 
-module.exports = apiLoggerMiddleware;
+module.exports = { apiLoggerMiddleware };

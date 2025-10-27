@@ -19,7 +19,7 @@ const serveIndex = require('serve-index');
 const { responseWrapper } = require('./utils/message');
 const { startRenderKeepAlive } = require('./utils/keepalive');
 const { swaggerUi, swaggerSpec } = require('./Swagger/swagger');
-const apiLoggerMiddleware = require('./updateDate/newData');
+const {apiLoggerMiddleware} = require('./updateDate/newData');
 
 // 路由模块
 const imageRouter = require('./router/imageRouter');
@@ -123,4 +123,6 @@ app.listen(PORT, () => {
 
   // 9.1 服务启动后开始 Render 保活（每 4 分钟一次）
   startRenderKeepAlive(`${renderUrl}/api/keepalive`, 4);
+  console.log(apiLoggerMiddleware,'apiLoggerMiddleware');
+  
 });
