@@ -25,7 +25,7 @@ const weatherRouter = require('./router/weatherRouter/weatherRouter');
 const pdfTestRouter = require('./router/jwtTestRouter/jwtTestRouter');
 
 // ⬛ 3. 常量定义
-const renderUrl = "https://wechat-image-compression.onrender.com/api/keepalive"; // Render保活地址
+const renderUrl = "https://render.setwhat.dpdns.org/api/keepalive"; // Render保活地址
 const PORT = 3001; // 服务端口
 
 // ⬛ 4. 应用初始化
