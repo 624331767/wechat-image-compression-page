@@ -87,7 +87,3 @@ exports.getweatherMethods = async (req, res) => {
 };
 
 
-
-// 获取资讯数据
-exports.realTimeInfo = async (req, res) => {
-};

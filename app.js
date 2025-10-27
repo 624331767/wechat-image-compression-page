@@ -13,6 +13,8 @@ const serveIndex = require('serve-index');
 // 自定义工具
 const { responseWrapper } = require('./utils/message');
 const { startRenderKeepAlive } = require('./utils/keepalive');
+const { swaggerUi, swaggerSpec }= require ('./Swagger/swagger')
+
 
 // 路由模块
 const imageRouter = require('./router/imageRouter');
@@ -25,7 +27,7 @@ const weatherRouter = require('./router/weatherRouter/weatherRouter');
 const pdfTestRouter = require('./router/jwtTestRouter/jwtTestRouter');
 
 // ⬛ 3. 常量定义
-const renderUrl = "https://render.setwhat.dpdns.org/api/keepalive"; // Render保活地址
+const renderUrl = "https://render.setwhat.dpdns.org"; // Render保活地址
 const PORT = 3001; // 服务端口
 
 // ⬛ 4. 应用初始化
@@ -37,6 +39,13 @@ app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'token']
+}));
+
+// Swagger API文档
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: "公众号图片压缩与上传服务API文档"
 }));
 
 // 响应封装（扩展res.success/res.fail）
@@ -63,12 +72,16 @@ staticDirs.forEach(({ route, dir }) => {
 });
 
 // ⬛ 7. 路由挂载（按API前缀集中）
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec)); // Swagger API文档
 // 主路由（/api前缀）
 app.use('/api', mainRouter);           // 页面用户相关
 app.use('/api', imageRouter);          // 图片处理相关
 app.use('/api', emailRouter);          // 邮件发送相关
 app.use('/api', keepaliveRouter);      // 保活接口相关
 app.use('/api', videoRouter);          // 视频处理相关
+
+
 
 // 其他前缀路由
 app.use('/api-weather', weatherRouter);   // 天气数据接口
@@ -85,6 +98,8 @@ app.use((err, req, res, next) => {
 // ⬛ 9. 服务启动
 app.listen(PORT, () => {
   console.log(`服务启动于 http://localhost:${PORT}`);
+  console.log(`📄 API文档地址: ${renderUrl}/api-docs`)
   // 服务启动后开始保活（确保服务已就绪）
-  startRenderKeepAlive(renderUrl, 4); // 每4分钟保活一次
+  startRenderKeepAlive(`${renderUrl}/api/keepalive`, 4); // 每4分钟保活一次
+  
 });
