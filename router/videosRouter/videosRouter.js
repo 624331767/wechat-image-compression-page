@@ -58,15 +58,27 @@
  *           description: 创建时间
  *           example: 2023-10-01T12:00:00Z
  */
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const { getCategories, getVideosByCategory, getVideoById, uploadVideo, deleteVideo, getAllVideos, updateVideo, addCategory, deleteCategory } = require('../../controllers/videos/index');
-const { crawl } = require('../../controllers/videos/crawler');
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const {
+  getCategories,
+  getVideosByCategory,
+  getVideoById,
+  uploadVideo,
+  deleteVideo,
+  getAllVideos,
+  updateVideo,
+  addCategory,
+  deleteCategory,
+  handleVideoChunkUpload,
+  handleVideoMergeChunks,
+} = require("../../controllers/videos/index");
+const { crawl } = require("../../controllers/videos/crawler");
 // 引入标准化上传工具
-const { fieldsUpload } = require('../../utils/upload');
+const { fieldsUpload, singleFile } = require("../../utils/upload");
 
 /**
  * =====================================================================================
@@ -74,28 +86,27 @@ const { fieldsUpload } = require('../../utils/upload');
  *  为视频和封面上传做准备
  * =====================================================================================
  */
-const uploadDir = path.join(__dirname, '../../uploads');
+const uploadDir = path.join(__dirname, "../../uploads");
 if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadDir);
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const safeFilename = uniqueSuffix + path.extname(file.originalname);
-        cb(null, safeFilename);
-    },
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const safeFilename = uniqueSuffix + path.extname(file.originalname);
+    cb(null, safeFilename);
+  },
 });
 
 const upload = multer({
-    storage: storage,
-    // 你可以在这里为视频和封面设置文件大小限制
-    // limits: { fileSize: 1024 * 1024 * 100 }, // 例如：限制文件大小为 100MB
+  storage: storage,
+  // 你可以在这里为视频和封面设置文件大小限制
+  // limits: { fileSize: 1024 * 1024 * 100 }, // 例如：限制文件大小为 100MB
 });
-
 
 /**
  * =====================================================================================
@@ -130,7 +141,7 @@ const upload = multer({
  *                   items:
  *                     $ref: '#/components/schemas/Category'
  */
-router.get('/categories', getCategories);
+router.get("/categories", getCategories);
 
 /**
  * @swagger
@@ -164,7 +175,7 @@ router.get('/categories', getCategories);
  *                   items:
  *                     $ref: '#/components/schemas/Video'
  */
-router.get('/videos', getVideosByCategory);
+router.get("/videos", getVideosByCategory);
 
 /**
  * @swagger
@@ -199,8 +210,7 @@ router.get('/videos', getVideosByCategory);
  *       404:
  *         description: 视频不存在
  */
-router.get('/videos/:id', getVideoById);
-
+router.get("/videos/:id", getVideoById);
 
 // --- 后台管理专用 API ---
 
@@ -227,7 +237,7 @@ router.get('/videos/:id', getVideoById);
  *                   items:
  *                     $ref: '#/components/schemas/Video'
  */
-router.get('/admin/videos', getAllVideos);
+router.get("/admin/videos", getAllVideos);
 
 /**
  * @swagger
@@ -264,14 +274,14 @@ router.get('/admin/videos', getAllVideos);
  *       500:
  *         description: 服务器错误
  */
-router.put('/admin/videos/:id', updateVideo);
+router.put("/admin/videos/:id", updateVideo);
 
 /**
  * @swagger
  * /api/admin/videos:
  *   post:
- *     summary: 上传新视频
- *     description: 上传视频文件和封面图片
+ *     summary: 上传新视频（已弃用，请使用分片上传）
+ *     description: 上传视频文件和封面图片（不推荐用于大文件，可能导致服务崩溃）
  *     tags: [视频管理]
  *     consumes:
  *       - multipart/form-data
@@ -298,6 +308,89 @@ router.put('/admin/videos/:id', updateVideo);
  *                 type: integer
  *     responses:
  *       200:
+ *
+ * /api/admin/videos/chunk:
+ *   post:
+ *     summary: 上传视频分片
+ *     description: 分片上传视频文件，适用于大文件上传
+ *     tags: [视频管理]
+ *     consumes:
+ *       - multipart/form-data
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: 视频文件分片
+ *               chunkNumber:
+ *                 type: integer
+ *                 description: 当前分片序号
+ *               totalChunks:
+ *                 type: integer
+ *                 description: 总分片数
+ *               filename:
+ *                 type: string
+ *                 description: 原始文件名
+ *               identifier:
+ *                 type: string
+ *                 description: 文件唯一标识符
+ *     responses:
+ *       200:
+ *         description: 分片上传成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 200
+ *                 message:
+ *                   type: string
+ *                   example: 分片上传成功
+ *       500:
+ *         description: 服务器错误
+ *
+ * /api/admin/videos/merge:
+ *   post:
+ *     summary: 合并视频分片
+ *     description: 合并已上传的视频分片，完成视频上传
+ *     tags: [视频管理]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               filename:
+ *                 type: string
+ *                 description: 原始文件名
+ *               identifier:
+ *                 type: string
+ *                 description: 文件唯一标识符
+ *               totalChunks:
+ *                 type: integer
+ *                 description: 总分片数
+ *               title:
+ *                 type: string
+ *                 description: 视频标题
+ *               description:
+ *                 type: string
+ *                 description: 视频描述
+ *               categoryId:
+ *                 type: integer
+ *                 description: 分类ID
+ *               coverFile:
+ *                 type: string
+ *                 description: 封面文件名（可选）
+ *     responses:
+ *       200:
  *         description: 视频上传成功
  *       400:
  *         description: 请求参数错误
@@ -306,15 +399,25 @@ router.put('/admin/videos/:id', updateVideo);
  */
 
 // 使用标准化上传中间件，处理视频和封面上传
-router.post('/admin/videos', fieldsUpload, (req, res) => {
-    console.log(222);
-    
-    // 检查视频文件
-    const videoFile = req.files && req.files.videoFile && req.files.videoFile[0];
-    if (!videoFile) {
-      return res.fail('缺少视频文件', 400);
-    }
-    uploadVideo(req, res);
+router.post("/admin/videos", fieldsUpload, (req, res) => {
+  // 移除调试日志
+
+  // 检查视频文件
+  const videoFile = req.files && req.files.videoFile && req.files.videoFile[0];
+  if (!videoFile) {
+    return res.status(400).json({ code: 400, message: "缺少视频文件" });
+  }
+  uploadVideo(req, res);
+});
+
+// 添加分片上传路由
+router.post("/admin/videos/chunk", singleFile, (req, res) => {
+  handleVideoChunkUpload(req, res);
+});
+
+// 添加分片合并路由（支持可选封面文件）
+router.post("/admin/videos/merge", singleFile, (req, res) => {
+  handleVideoMergeChunks(req, res);
 });
 
 // 采集接口：POST /api/admin/crawl
@@ -343,7 +446,7 @@ router.post('/admin/videos', fieldsUpload, (req, res) => {
  *       500:
  *         description: 服务器错误
  */
-router.post('/admin/crawl', crawl);
+router.post("/admin/crawl", crawl);
 
 // 删除视频接口
 /**
@@ -368,7 +471,7 @@ router.post('/admin/crawl', crawl);
  *       500:
  *         description: 服务器错误
  */
-router.delete('/admin/videos/:id', deleteVideo);
+router.delete("/admin/videos/:id", deleteVideo);
 
 // 添加视频分类
 /**
@@ -396,7 +499,7 @@ router.delete('/admin/videos/:id', deleteVideo);
  *       500:
  *         description: 服务器错误
  */
-router.post('/admin/categories', addCategory);
+router.post("/admin/categories", addCategory);
 
 // 删除视频分类
 /**
@@ -421,6 +524,6 @@ router.post('/admin/categories', addCategory);
  *       500:
  *         description: 服务器错误
  */
-router.delete('/admin/categories/:id', deleteCategory);
+router.delete("/admin/categories/:id", deleteCategory);
 
 module.exports = router;
