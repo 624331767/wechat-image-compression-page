@@ -21,9 +21,68 @@ const CHUNK_DIR = path.join(ROOT_DIR, "chunks");
 
 // 从完整URL中提取存储键（如从https://xxx/videos/covers/xxx提取出videos/covers/xxx）
 const getKeyFromUrl = (url) => {
-  if (!url) return null;
-  const baseUrl = getPublicBaseUrl();
-  return url.replace(baseUrl, "");
+  try {
+    console.log(`开始从URL提取文件键: ${url}`);
+    if (!url) {
+      console.log('URL为空，返回null');
+      return null;
+    }
+    
+    // 直接从URL中提取路径部分，不依赖baseUrl
+    // 例如: https://oss.setwhat.dpdns.org/videos/file.mp4 -> videos/file.mp4
+    const urlObj = new URL(url);
+    let fileKey = urlObj.pathname;
+    
+    // 移除开头的斜杠
+    if (fileKey.startsWith('/')) {
+      fileKey = fileKey.substring(1);
+    }
+    
+    // 验证提取的文件键是否合理
+    if (!fileKey || fileKey.trim() === '') {
+      console.error('提取的文件键为空');
+      // 如果无法提取，尝试备选方案：从URL字符串中直接解析
+      const urlParts = url.split('/');
+      // 寻找可能的文件路径部分（通常包含扩展名或特定路径段）
+      const potentialKeys = [];
+      for (let i = 0; i < urlParts.length; i++) {
+        if (urlParts[i] === 'videos' && i + 1 < urlParts.length) {
+          // 找到了videos目录，后面的部分可能是我们需要的
+          potentialKeys.push(urlParts.slice(i).join('/'));
+        }
+      }
+      
+      if (potentialKeys.length > 0) {
+        fileKey = potentialKeys[0];
+        console.log(`使用备选方法提取的文件键: ${fileKey}`);
+      } else if (urlParts.length > 0) {
+        // 最后的备选方案：使用URL的最后一部分
+        fileKey = urlParts[urlParts.length - 1];
+        console.log(`使用最后一部分作为文件键: ${fileKey}`);
+      }
+    }
+    
+    console.log(`成功提取到文件键: ${fileKey}`);
+    return fileKey;
+  } catch (error) {
+    console.error(`提取文件键时出错: ${error.message}`);
+    console.error(error.stack);
+    
+    // 最后的容错处理
+    try {
+      // 即使URL解析失败，也尝试简单的分割方法
+      const urlParts = url.split('/');
+      if (urlParts.length > 0) {
+        const lastPart = urlParts[urlParts.length - 1];
+        console.log(`使用简单分割提取的文件键: ${lastPart}`);
+        return lastPart;
+      }
+    } catch (e) {
+      console.error('简单分割也失败了:', e.message);
+    }
+    
+    return null;
+  }
 };
 
 /**
@@ -60,28 +119,25 @@ exports.getVideosByCategory = async (req, res) => {
     const parsedPageSize = parseInt(pageSize, 10);
 
     if (
-      isNaN(parsedPage) ||
-      parsedPage < 1 ||
-      isNaN(parsedPageSize) ||
-      parsedPageSize < 1
+      isNaN(parsedPage) || parsedPage < 1 ||
+      isNaN(parsedPageSize) || parsedPageSize < 1
     ) {
       return res.fail("页码和每页大小参数无效", 400);
     }
 
     const offset = (parsedPage - 1) * parsedPageSize;
 
+    // 正确写法：LIMIT 和 OFFSET 用 ? 占位符，参数数组传递 3 个值
     const [videos, countResult] = await Promise.all([
       db.query(
         `SELECT id, title, description, category, cover_url, view_count, created_at, video_url 
-                 FROM videos 
-                 WHERE category_id = ? 
-                 ORDER BY created_at DESC 
-                 LIMIT ${parsedPageSize} OFFSET ${offset}`,
-        [categoryId]
+         FROM videos 
+         WHERE category_id = ? 
+         ORDER BY created_at DESC 
+         LIMIT ? OFFSET ?`,  // 3 个占位符
+        [categoryId, parsedPageSize, offset]  // 3 个参数（一一对应）
       ),
-      db.query("SELECT COUNT(*) as count FROM videos WHERE category_id = ?", [
-        categoryId,
-      ]),
+      db.query("SELECT COUNT(*) as count FROM videos WHERE category_id = ?", [categoryId])
     ]);
 
     const totalRecords = countResult[0].count;
@@ -94,7 +150,6 @@ exports.getVideosByCategory = async (req, res) => {
       totalPages,
     };
 
-    // 数据库已存完整URL，直接返回
     res.success(videos, "获取视频列表成功", 200, { pagination });
   } catch (error) {
     console.error("获取视频列表失败:", error);
@@ -463,32 +518,58 @@ exports.deleteVideo = async (req, res) => {
 
     // 删除Tebi视频（从URL提取键）
     if (video.video_url) {
+      console.log(`===== 开始删除视频文件 =====`);
+      console.log(`视频URL: ${video.video_url}`);
       try {
         const videoKey = getKeyFromUrl(video.video_url);
-        const deleteResult = await deleteFromTebi(videoKey);
-        if (deleteResult.success) {
-          console.log(`删除视频成功: ${video.video_url}`);
+        console.log(`提取到的视频文件键: ${videoKey}`);
+        
+        if (!videoKey) {
+          console.error(`无法提取有效的视频文件键，跳过删除`);
         } else {
-          console.warn(`删除视频失败: ${deleteResult.error}`);
+          console.log(`调用deleteFromTebi删除视频文件`);
+          const deleteResult = await deleteFromTebi(videoKey);
+          console.log(`deleteFromTebi返回结果:`, deleteResult);
+          
+          if (deleteResult.success) {
+            console.log(`✅ 视频文件删除成功`);
+          } else {
+            console.warn(`❌ 视频文件删除失败: ${deleteResult.error}`);
+          }
         }
       } catch (e) {
-        console.error(`删除视频异常: ${e.message}`);
+        console.error(`❌ 删除视频过程中异常: ${e.message}`);
+        console.error(e.stack);
       }
+      console.log(`===== 视频文件删除处理完成 =====`);
     }
 
     // 删除Tebi封面（从URL提取键）
     if (video.cover_url) {
+      console.log(`===== 开始删除封面文件 =====`);
+      console.log(`封面URL: ${video.cover_url}`);
       try {
         const coverKey = getKeyFromUrl(video.cover_url);
-        const deleteResult = await deleteFromTebi(coverKey);
-        if (deleteResult.success) {
-          console.log(`删除封面成功: ${video.cover_url}`);
+        console.log(`提取到的封面文件键: ${coverKey}`);
+        
+        if (!coverKey) {
+          console.error(`无法提取有效的封面文件键，跳过删除`);
         } else {
-          console.warn(`删除封面失败: ${deleteResult.error}`);
+          console.log(`调用deleteFromTebi删除封面文件`);
+          const deleteResult = await deleteFromTebi(coverKey);
+          console.log(`deleteFromTebi返回结果:`, deleteResult);
+          
+          if (deleteResult.success) {
+            console.log(`✅ 封面文件删除成功`);
+          } else {
+            console.warn(`❌ 封面文件删除失败: ${deleteResult.error}`);
+          }
         }
       } catch (e) {
-        console.error(`删除封面异常: ${e.message}`);
+        console.error(`❌ 删除封面过程中异常: ${e.message}`);
+        console.error(e.stack);
       }
+      console.log(`===== 封面文件删除处理完成 =====`);
     }
 
     // 删除数据库记录
@@ -528,31 +609,47 @@ exports.addCategory = async (req, res) => {
  */
 exports.getAllVideos = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
-    const offset = (page - 1) * limit;
+    // 最基本的参数处理方式
+    let page = Number(req.query.page) || 1;
+    let limit = Number(req.query.limit) || 10;
     
-    // 获取总数
+    // 确保参数为有效的正整数
+    page = page < 1 ? 1 : Math.floor(page);
+    limit = limit < 1 ? 10 : limit > 100 ? 100 : Math.floor(limit);
+    const offset = Math.floor((page - 1) * limit);
+    
+    // 调试日志
+    console.log(`分页参数 - page: ${page}, limit: ${limit}, offset: ${offset}`);
+    
+    // 获取总数 - 这个查询似乎正常工作
     const [totalResult] = await db.query("SELECT COUNT(*) as count FROM videos");
     const total = totalResult.count;
     
-    // 获取视频列表（完整URL）
-    const [videos] = await db.query(
-      "SELECT * FROM videos ORDER BY created_at DESC LIMIT ? OFFSET ?",
-      [parseInt(limit), parseInt(offset)]
+    // 尝试不同的查询方式，避免预处理语句参数问题
+    // 直接拼接到SQL中（仅适用于数字参数，避免SQL注入风险）
+    const videos = await db.query(
+      `SELECT * FROM videos ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
     );
-    
-    res.success({
-      list: videos,
+
+ 
+
+
+
+  const pagination = {
       total,
       page: parseInt(page),
       limit: parseInt(limit),
       totalPages: Math.ceil(total / limit)
-    });
+    };
+
+     res.success(videos, "获取视频列表成功", 200, { pagination });
   } catch (error) {
     console.error("获取视频列表失败:", error);
     res.fail("服务器内部错误", 500);
   }
 };
+
+
 
 /**
  * [后台管理] 更新视频信息

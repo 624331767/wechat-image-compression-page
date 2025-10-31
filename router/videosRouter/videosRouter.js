@@ -400,7 +400,7 @@ router.post("/admin/videos", fieldsUpload, uploadVideo);
 router.post("/admin/videos/chunk", upload.single('file'), handleVideoChunkUpload);
 
 // 添加分片合并路由（支持可选封面文件）
-router.post("/admin/videos/merge", fieldsUpload, handleVideoMergeChunks);
+router.post("/admin/videos/merge", upload.single('file'), handleVideoMergeChunks);
 
 // 采集接口：POST /api/admin/crawl
 /**

@@ -123,25 +123,84 @@ function getPublicUrl(fileKey) {
 }
 
 /**
+ * 获取基础URL（用于从完整URL中提取文件键）
+ * @returns {string} 基础URL
+ */
+function getPublicBaseUrl() {
+  return tebiConfig.customDomain;
+}
+
+/**
  * 删除Tebi存储中的文件
  * @param {string} fileKey - 文件在存储桶中的键
- * @returns {Promise<boolean>} 删除是否成功
+ * @returns {Promise<Object>} 删除结果对象
  */
 async function deleteFromTebi(fileKey) {
   try {
+    console.log(`📤 开始执行文件删除操作`);
+    console.log(`删除参数: fileKey='${fileKey}', bucket='${tebiConfig.bucketName}'`);
+    
+    // 验证参数
+    if (!fileKey || typeof fileKey !== 'string' || fileKey.trim() === '') {
+      const errorMsg = '无效的文件键参数';
+      console.error(`❌ 删除失败: ${errorMsg}`);
+      return { 
+        success: false, 
+        error: errorMsg,
+        details: { fileKey, bucket: tebiConfig.bucketName }
+      };
+    }
+    
+    if (!tebiConfig.bucketName) {
+      const errorMsg = '未配置存储桶名称';
+      console.error(`❌ 删除失败: ${errorMsg}`);
+      return { 
+        success: false, 
+        error: errorMsg,
+        details: { fileKey, bucket: tebiConfig.bucketName }
+      };
+    }
+    
     // 创建删除命令
     const command = new DeleteObjectCommand({
       Bucket: tebiConfig.bucketName,
-      Key: fileKey
+      Key: fileKey.trim()
     });
     
+    console.log(`📝 准备发送删除命令到S3客户端`);
+    
     // 执行删除
-    await s3Client.send(command);
-    console.log('🗑️ 已删除Tebi文件:', fileKey);
-    return { success: true };
+    const response = await s3Client.send(command);
+    console.log(`✅ 删除命令执行成功，响应:`, response);
+    console.log(`🗑️ 已成功删除Tebi文件: ${fileKey}`);
+    
+    return { 
+      success: true, 
+      response,
+      fileKey,
+      bucket: tebiConfig.bucketName
+    };
   } catch (error) {
-    console.error('删除Tebi文件失败:', error);
-    return { success: false, error: error.message };
+    console.error(`❌ 删除Tebi文件失败: ${error.message}`);
+    console.error('错误详情:', error);
+    
+    // 提取更多错误信息
+    const errorDetails = {
+      message: error.message,
+      code: error.code || 'Unknown',
+      statusCode: error.$metadata?.httpStatusCode || 'Unknown',
+      requestId: error.$metadata?.requestId || 'Unknown',
+      extendedRequestId: error.$metadata?.extendedRequestId || 'Unknown',
+      fileKey,
+      bucket: tebiConfig.bucketName
+    };
+    
+    return { 
+      success: false, 
+      error: error.message,
+      details: errorDetails,
+      originalError: error
+    };
   }
 }
 
@@ -169,6 +228,7 @@ module.exports = {
   uploadToTebi,
   getPresignedUrl,
   getPublicUrl,
+  getPublicBaseUrl,
   deleteFromTebi,
   listFiles
 };
