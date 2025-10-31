@@ -6,7 +6,7 @@ const db = require("../../db/index");
 const ffmpeg = require("fluent-ffmpeg");
 const path = require("path");
 const fs = require("fs");
-const { pdfbseUrl } = require("../../config/database.js");
+
 const { uploadToTebi, deleteFromTebi, getPublicUrl, getPublicBaseUrl } = require("../../utils/tebiStorage");
 
 // 定义临时存储目录
@@ -107,7 +107,7 @@ exports.getCategories = async (req, res) => {
  * @param {import('express').Request} req
  * @param {import('express').Response} res
  */
-exports.getVideosByCategory = async (req, res) => {
+ exports.getVideosByCategory = async (req, res) => {
   try {
     const { categoryId, page = 1, pageSize = 10 } = req.query;
 
@@ -115,29 +115,33 @@ exports.getVideosByCategory = async (req, res) => {
       return res.fail("必须提供 categoryId 参数", 400);
     }
 
+    // 确保所有分页参数为整数
+    const parsedCategoryId = parseInt(categoryId, 10);
     const parsedPage = parseInt(page, 10);
     const parsedPageSize = parseInt(pageSize, 10);
 
-    if (
-      isNaN(parsedPage) || parsedPage < 1 ||
-      isNaN(parsedPageSize) || parsedPageSize < 1
-    ) {
+    if (isNaN(parsedCategoryId)) {
+      return res.fail("categoryId 必须是有效的数字", 400);
+    }
+
+    if (isNaN(parsedPage) || parsedPage < 1 || isNaN(parsedPageSize) || parsedPageSize < 1) {
       return res.fail("页码和每页大小参数无效", 400);
     }
 
     const offset = (parsedPage - 1) * parsedPageSize;
 
-    // 正确写法：LIMIT 和 OFFSET 用 ? 占位符，参数数组传递 3 个值
+    // 注意：在 MySQL 预处理语句中，LIMIT/OFFSET 不支持使用占位符。
+    // 因此将它们拼接为经过验证的整数常量，仅对 categoryId 使用占位符。
+    const videosSql =
+      `SELECT id, title, description, category, cover_url, view_count, created_at, video_url 
+       FROM videos 
+       WHERE category_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT ${parsedPageSize} OFFSET ${offset}`;
+
     const [videos, countResult] = await Promise.all([
-      db.query(
-        `SELECT id, title, description, category, cover_url, view_count, created_at, video_url 
-         FROM videos 
-         WHERE category_id = ? 
-         ORDER BY created_at DESC 
-         LIMIT ? OFFSET ?`,  // 3 个占位符
-        [categoryId, parsedPageSize, offset]  // 3 个参数（一一对应）
-      ),
-      db.query("SELECT COUNT(*) as count FROM videos WHERE category_id = ?", [categoryId])
+      db.query(videosSql, [parsedCategoryId]),
+      db.query("SELECT COUNT(*) as count FROM videos WHERE category_id = ?", [parsedCategoryId])
     ]);
 
     const totalRecords = countResult[0].count;
