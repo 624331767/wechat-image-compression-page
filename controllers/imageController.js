@@ -1,12 +1,11 @@
 /**
  * 图片压缩上传控制器
- * 核心流程：接收客户端图片 -> 校验（token/文件/appid） -> 压缩处理 -> 转发至目标服务器 -> 返回结果
- * 依赖：sharp(图片处理)、axios(HTTP请求)、form-data(表单构建)
+ * 核心流程：接收客户端图片 -> 校验（token/文件/appid） -> 压缩处理 -> 上传至Tebi对象存储 -> 返回结果
+ * 依赖：sharp(图片处理)、Tebi存储工具
  */
 const sharp = require("sharp");       // 高效图片处理库（压缩/旋转/缩放）
-const axios = require("axios");       // HTTP客户端，用于转发图片到目标服务器
-const FormData = require("form-data"); // 构建multipart/form-data格式请求体
-const { appidArr } = require("../config/wechat"); // 应用配置（含目标服务器地址）
+const { appidArr } = require("../config/wechat"); // 应用配置
+const { uploadToTebi } = require("../utils/tebiStorage"); // Tebi对象存储工具
 
 
 // ------------------------------
@@ -113,24 +112,6 @@ const compressImageBuffer = async (imageBuffer, targetWidth, targetHeight) => {
 // 网络请求类辅助函数：构建请求/转发
 // ------------------------------
 
-/**
- * 构建转发到目标服务器的表单数据
- * @param {Buffer} compressedBuffer - 压缩后的图片二进制数据
- * @param {string} token - 客户端认证token（透传至目标服务器）
- * @param {string} filename - 原图文件名（保留原始名称）
- * @returns {FormData} 构建好的multipart/form-data表单对象
- */
-const buildUploadForm = (compressedBuffer, token, filename) => {
-  const formData = new FormData();
-  formData.append("token", token); // 透传token供目标服务器验证
-  formData.append("file", compressedBuffer, {
-    filename: filename || "upload.jpg", // 默认为upload.jpg
-    contentType: "image/jpeg" // 明确文件类型为jpeg
-  });
-  return formData;
-};
-
-
 // ------------------------------
 // 主控制器：串联整个图片处理流程
 // ------------------------------
@@ -146,7 +127,6 @@ const compressImage = async (req, res, next) => {
     // 1. 验证token（权限校验）
     const token = req.headers.token;
     if (!validateToken(token)) {
-
       return res.fail("token 无效或缺失", 401);
     }
 
@@ -154,19 +134,16 @@ const compressImage = async (req, res, next) => {
     const fileError = validateFile(req.file);
     if (fileError) {
       return res.fail(fileError, 400);
-    
     }
     const originalFile = req.file;
     console.log(`✅ 接收图片：${originalFile.originalname}，原始大小：${(originalFile.size / 1024).toFixed(2)} KB`);
 
-    // 3. 校验appid并获取目标服务器地址（路由校验）
+    // 3. 校验appid（路由校验）
     const appidResult = validateAppid(req.body.appid);
     if (typeof appidResult === "string") { // 若返回字符串，说明是错误信息
-
       return res.fail(appidResult, 400);
     }
-    const targetServerUrl = `${appidArr[appidResult].url}/upload`; // 拼接目标服务器上传接口
-    console.log(`🎯 目标服务器地址：${targetServerUrl}`);
+    console.log(`✅ 验证通过：appid=${req.body.appid}`);
 
     // 4. 计算图片压缩尺寸（预处理）
     const { width: originalWidth, height: originalHeight } = await sharp(originalFile.buffer).metadata();
@@ -179,22 +156,27 @@ const compressImage = async (req, res, next) => {
     const compressedBuffer = await compressImageBuffer(originalFile.buffer, targetWidth, targetHeight);
     console.log(`📉 压缩完成：大小 ${(compressedBuffer.length / 1024).toFixed(2)} KB`);
 
-    // 6. 转发压缩后的图片到目标服务器（转发处理）
-    const formData = buildUploadForm(compressedBuffer, token, originalFile.originalname);
+    // 6. 上传压缩后的图片到Tebi对象存储
+    const tebiUploadResult = await uploadToTebi(
+      compressedBuffer, 
+      originalFile.originalname, 
+      "image/jpeg"
+    );
     
-    const uploadResponse = await axios.post(targetServerUrl, formData, {
-      headers: { ...formData.getHeaders() }, // 自动携带multipart边界信息
-      maxBodyLength: Infinity, // 允许超大文件（避免截断）
-      timeout: UPLOAD_TIMEOUT, // 超时时间2分钟
-      responseType: "json",
-      validateStatus: (status) => status < 500 // 捕获4xx错误（如目标服务器验证失败）
-    });
-    console.log("🌐 目标服务器响应：", uploadResponse.data);
+    if (!tebiUploadResult.success) {
+      console.error("❌ Tebi上传失败：", tebiUploadResult.error);
+      return res.fail(`图片上传到Tebi失败：${tebiUploadResult.error}`, 500);
+    }
+    
+    console.log(`✅ Tebi上传成功：${tebiUploadResult.url}`);
 
     // 7. 返回结果给客户端（响应处理）
-
     const data = {
-      resultdata: uploadResponse.data, // 透传目标服务器的响应数据
+      resultdata: {
+        url: tebiUploadResult.url,
+        fileKey: tebiUploadResult.fileKey,
+        success: true
+      },
       fileInfo: { // 附加文件处理信息，便于客户端展示
         originalName: originalFile.originalname,
         originalSizeKB: (originalFile.size / 1024).toFixed(2),
@@ -203,7 +185,7 @@ const compressImage = async (req, res, next) => {
         compressedDimension: `${targetWidth}x${targetHeight}`
       }
     }
-    return res.success(data, "图片压缩并上传成功");
+    return res.success(data, "图片压缩并上传到Tebi成功");
 
   } catch (error) {
     console.error("❌ 处理流程出错：", error);

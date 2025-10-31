@@ -127,8 +127,34 @@ async function downloadFile(url, destFolder) {
   });
 }
 
+// 导入Tebi存储工具
+const { uploadToTebi } = require('../../utils/tebiStorage');
+
 /**
- * 调用本地上传接口上传视频和封面
+ * 获取文件的MIME类型
+ * @param {string} filename - 文件名
+ * @returns {string} MIME类型
+ */
+function getContentType(filename) {
+  const extension = path.extname(filename).toLowerCase();
+  const mimeTypes = {
+    '.mp4': 'video/mp4',
+    '.avi': 'video/x-msvideo',
+    '.mov': 'video/quicktime',
+    '.wmv': 'video/x-ms-wmv',
+    '.flv': 'video/x-flv',
+    '.mkv': 'video/x-matroska',
+    '.webm': 'video/webm',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif'
+  };
+  return mimeTypes[extension] || 'application/octet-stream';
+}
+
+/**
+ * 使用Tebi对象存储上传视频和封面
  * @param {Object} uploadData - 包含上传所需数据的对象
  * @param {string} uploadData.title - 视频标题
  * @param {string} uploadData.description - 视频描述
@@ -137,13 +163,9 @@ async function downloadFile(url, destFolder) {
  * @param {string} uploadData.coverPath - 本地封面文件完整路径
  */
 async function uploadToServer({ title, description, category, videoPath, coverPath }) {
-  console.log(`[Upload] 准备上传视频: "${title}"`);
-  const form = new FormData();
-  form.append('title', title);
-  form.append('description', description || '');
-  form.append('category', category || '采集'); // 默认分类
+  console.log(`[Upload] 准备上传视频: "${title}"到Tebi存储`);
 
-  // 确保文件存在再添加
+  // 确保文件存在
   if (!fs.existsSync(videoPath)) {
     throw new Error(`视频文件不存在: ${videoPath}`);
   }
@@ -151,26 +173,66 @@ async function uploadToServer({ title, description, category, videoPath, coverPa
     throw new Error(`封面文件不存在: ${coverPath}`);
   }
 
-  form.append('video', fs.createReadStream(videoPath));
-  form.append('cover', fs.createReadStream(coverPath));
-
   try {
+    // 读取视频文件并上传到Tebi
+    const videoBuffer = fs.readFileSync(videoPath);
+    const videoFileName = path.basename(videoPath);
+    const videoUploadResult = await uploadToTebi(
+      videoBuffer,
+      videoFileName,
+      getContentType(videoFileName)
+    );
     
-    const response = await axios.post(`${pdfbseUrl}/api/admin/videos`, form, {
-      headers: form.getHeaders(),
-      maxBodyLength: Infinity, // 应对大文件上传
-      maxContentLength: Infinity // 应对大文件上传
+    if (!videoUploadResult.success) {
+      throw new Error(`视频上传到Tebi失败: ${videoUploadResult.error}`);
+    }
+    
+    const videoUrl = videoUploadResult.url;
+    console.log('视频上传到Tebi成功:', videoUrl);
+
+    // 读取封面文件并上传到Tebi
+    const coverBuffer = fs.readFileSync(coverPath);
+    const coverFileName = path.basename(coverPath);
+    const coverUploadResult = await uploadToTebi(
+      coverBuffer,
+      coverFileName,
+      getContentType(coverFileName)
+    );
+    
+    if (!coverUploadResult.success) {
+      throw new Error(`封面上传到Tebi失败: ${coverUploadResult.error}`);
+    }
+    
+    const coverUrl = coverUploadResult.url;
+    console.log('封面上传到Tebi成功:', coverUrl);
+
+    // 清理本地临时文件
+    console.log(`[Cleanup] 删除本地文件: ${videoPath}, ${coverPath}`);
+    fs.unlinkSync(videoPath);
+    fs.unlinkSync(coverPath);
+
+    // 这里可以添加保存视频信息到数据库的逻辑
+    // 如果需要，调用API保存视频元数据
+    const formData = {
+      title,
+      description: description || '',
+      category: category || '采集',
+      video_url: videoUrl,
+      cover_url: coverUrl
+    };
+
+    const response = await axios.post(`${pdfbseUrl}/api/admin/videos`, formData, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
     });
-    console.log(`[Upload] 视频 "${title}" 上传成功。服务器响应:`, response.data);
+    
+    console.log(`[Upload] 视频 "${title}" 信息保存成功。服务器响应:`, response.data);
+    return response.data;
   } catch (error) {
     // 更详细的错误信息
     const errMsg = error.response ? `Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}` : error.message;
-    throw new Error(`上传视频到服务器失败: ${title}. 错误: ${errMsg}`);
-  } finally {
-    // 清理本地下载的文件 (可选，取决于你的需求，如果不需要保留可以删除)
-    // console.log(`[Cleanup] 删除本地文件: ${videoPath}, ${coverPath}`);
-    // fs.unlinkSync(videoPath);
-    // fs.unlinkSync(coverPath);
+    throw new Error(`上传视频到Tebi失败: ${title}. 错误: ${errMsg}`);
   }
 }
 

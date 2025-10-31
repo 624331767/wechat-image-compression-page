@@ -327,18 +327,15 @@ router.put("/admin/videos/:id", updateVideo);
  *                 type: string
  *                 format: binary
  *                 description: 视频文件分片
- *               chunkNumber:
+ *               chunkIndex:
  *                 type: integer
  *                 description: 当前分片序号
  *               totalChunks:
  *                 type: integer
  *                 description: 总分片数
- *               filename:
+ *               fileName:
  *                 type: string
  *                 description: 原始文件名
- *               identifier:
- *                 type: string
- *                 description: 文件唯一标识符
  *     responses:
  *       200:
  *         description: 分片上传成功
@@ -371,9 +368,7 @@ router.put("/admin/videos/:id", updateVideo);
  *               filename:
  *                 type: string
  *                 description: 原始文件名
- *               identifier:
- *                 type: string
- *                 description: 文件唯一标识符
+
  *               totalChunks:
  *                 type: integer
  *                 description: 总分片数
@@ -399,26 +394,13 @@ router.put("/admin/videos/:id", updateVideo);
  */
 
 // 使用标准化上传中间件，处理视频和封面上传
-router.post("/admin/videos", fieldsUpload, (req, res) => {
-  // 移除调试日志
-
-  // 检查视频文件
-  const videoFile = req.files && req.files.videoFile && req.files.videoFile[0];
-  if (!videoFile) {
-    return res.status(400).json({ code: 400, message: "缺少视频文件" });
-  }
-  uploadVideo(req, res);
-});
+router.post("/admin/videos", fieldsUpload, uploadVideo);
 
 // 添加分片上传路由
-router.post("/admin/videos/chunk", singleFile, (req, res) => {
-  handleVideoChunkUpload(req, res);
-});
+router.post("/admin/videos/chunk", upload.single('file'), handleVideoChunkUpload);
 
 // 添加分片合并路由（支持可选封面文件）
-router.post("/admin/videos/merge", singleFile, (req, res) => {
-  handleVideoMergeChunks(req, res);
-});
+router.post("/admin/videos/merge", fieldsUpload, handleVideoMergeChunks);
 
 // 采集接口：POST /api/admin/crawl
 /**
