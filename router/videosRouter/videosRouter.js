@@ -73,8 +73,11 @@ const {
   updateVideo,
   addCategory,
   deleteCategory,
+  initVideoUpload,
+  checkVideoChunks,
   handleVideoChunkUpload,
   handleVideoMergeChunks,
+  cleanupChunks,
 } = require("../../controllers/videos/index");
 const { crawl } = require("../../controllers/videos/crawler");
 // 引入标准化上传工具
@@ -396,11 +399,20 @@ router.put("/admin/videos/:id", updateVideo);
 // 使用标准化上传中间件，处理视频和封面上传
 router.post("/admin/videos", fieldsUpload, uploadVideo);
 
+// 初始化Tebi分段上传（用于断点续传）
+router.post("/admin/videos/init-upload", initVideoUpload);
+
+// 检查已上传的分片（用于断点续传）- 从Tebi查询
+router.get("/admin/videos/chunks-check", checkVideoChunks);
+
 // 添加分片上传路由
 router.post("/admin/videos/chunk", upload.single('file'), handleVideoChunkUpload);
 
 // 添加分片合并路由（支持可选封面文件）
 router.post("/admin/videos/merge", upload.single('file'), handleVideoMergeChunks);
+
+// 添加分片清理路由
+router.post("/admin/videos/cleanup-chunks", cleanupChunks);
 
 // 采集接口：POST /api/admin/crawl
 /**

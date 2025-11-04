@@ -1,806 +1,626 @@
 /**
  * @file controllers/videos/index.js
- * @description 视频相关业务的控制器
+ * @description 视频管理相关的控制器
  */
-const db = require("../../db/index");
-const ffmpeg = require("fluent-ffmpeg");
-const path = require("path");
-const fs = require("fs");
 
-const { uploadToTebi, deleteFromTebi, getPublicUrl, getPublicBaseUrl } = require("../../utils/tebiStorage");
+const fs = require('fs');
+const path = require('path');
+const db = require('../../db/index');
+const { pdfbseUrl } = require('../../config/database');
+const { 
+  initiateMultipartUpload, 
+  uploadPart, 
+  completeMultipartUpload, 
+  abortMultipartUpload,
+  listUploadedParts,
+  getPublicUrl,
+  listMultipartUploads
+} = require('../../utils/tebiStorage');
 
-// 定义临时存储目录
-const ROOT_DIR = path.join(__dirname, "../../");
-const UPLOADS_DIR = path.join(ROOT_DIR, "uploads");
-const CHUNK_DIR = path.join(ROOT_DIR, "chunks");
+// ========================= 基础目录配置 ========================= //
+const ROOT_DIR = process.cwd();
+const UPLOAD_DIR = path.join(ROOT_DIR, 'uploads');
+const CHUNK_DIR = path.join(ROOT_DIR, 'chunks');
 
-// 确保目录存在
-[UPLOADS_DIR, CHUNK_DIR].forEach((dir) =>
-  fs.mkdirSync(dir, { recursive: true })
-);
-
-// 从完整URL中提取存储键（如从https://xxx/videos/covers/xxx提取出videos/covers/xxx）
-const getKeyFromUrl = (url) => {
-  try {
-    console.log(`开始从URL提取文件键: ${url}`);
-    if (!url) {
-      console.log('URL为空，返回null');
-      return null;
-    }
-    
-    // 直接从URL中提取路径部分，不依赖baseUrl
-    // 例如: https://oss.setwhat.dpdns.org/videos/file.mp4 -> videos/file.mp4
-    const urlObj = new URL(url);
-    let fileKey = urlObj.pathname;
-    
-    // 移除开头的斜杠
-    if (fileKey.startsWith('/')) {
-      fileKey = fileKey.substring(1);
-    }
-    
-    // 验证提取的文件键是否合理
-    if (!fileKey || fileKey.trim() === '') {
-      console.error('提取的文件键为空');
-      // 如果无法提取，尝试备选方案：从URL字符串中直接解析
-      const urlParts = url.split('/');
-      // 寻找可能的文件路径部分（通常包含扩展名或特定路径段）
-      const potentialKeys = [];
-      for (let i = 0; i < urlParts.length; i++) {
-        if (urlParts[i] === 'videos' && i + 1 < urlParts.length) {
-          // 找到了videos目录，后面的部分可能是我们需要的
-          potentialKeys.push(urlParts.slice(i).join('/'));
-        }
-      }
-      
-      if (potentialKeys.length > 0) {
-        fileKey = potentialKeys[0];
-        console.log(`使用备选方法提取的文件键: ${fileKey}`);
-      } else if (urlParts.length > 0) {
-        // 最后的备选方案：使用URL的最后一部分
-        fileKey = urlParts[urlParts.length - 1];
-        console.log(`使用最后一部分作为文件键: ${fileKey}`);
-      }
-    }
-    
-    console.log(`成功提取到文件键: ${fileKey}`);
-    return fileKey;
-  } catch (error) {
-    console.error(`提取文件键时出错: ${error.message}`);
-    console.error(error.stack);
-    
-    // 最后的容错处理
-    try {
-      // 即使URL解析失败，也尝试简单的分割方法
-      const urlParts = url.split('/');
-      if (urlParts.length > 0) {
-        const lastPart = urlParts[urlParts.length - 1];
-        console.log(`使用简单分割提取的文件键: ${lastPart}`);
-        return lastPart;
-      }
-    } catch (e) {
-      console.error('简单分割也失败了:', e.message);
-    }
-    
-    return null;
+// 初始化目录结构
+[UPLOAD_DIR, CHUNK_DIR].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
-};
+});
+
+/**
+ * 清理超过2小时的分片文件
+ * 只清理长时间未使用的分片目录，避免清理正在上传的分片
+ */
+function cleanupOldChunks() {
+  try {
+    console.log('开始清理超过2小时未使用的分片文件...');
+    
+    if (!fs.existsSync(CHUNK_DIR)) {
+      console.log('分片目录不存在，跳过清理');
+      return;
+    }
+    
+    const now = Date.now();
+    const twoHours = 2 * 60 * 60 * 1000; // 2小时的毫秒数
+    
+    const items = fs.readdirSync(CHUNK_DIR);
+    let cleanedCount = 0;
+    
+    for (const item of items) {
+      const itemPath = path.join(CHUNK_DIR, item);
+      const stat = fs.statSync(itemPath);
+      
+      // 检查是否是目录且超过2小时未修改
+      if (stat.isDirectory() && (now - stat.mtime.getTime()) > twoHours) {
+        console.log(`清理旧分片目录: ${itemPath} (最后修改时间: ${stat.mtime.toISOString()})`);
+        fs.rmSync(itemPath, { recursive: true, force: true });
+        cleanedCount++;
+      }
+    }
+    
+    console.log(`分片清理完成，共清理 ${cleanedCount} 个旧目录`);
+  } catch (error) {
+    console.error('清理旧分片失败:', error);
+  }
+}
+
+// 设置定期清理任务 - 每2小时执行一次
+setInterval(cleanupOldChunks, 2 * 60 * 60 * 1000);
+
+// 应用启动后5秒执行首次清理
+setTimeout(cleanupOldChunks, 5000);
+
+/**
+ * 清理Tebi中超过2小时的未完成分段上传
+ * 这些未完成的上传会占用存储空间，需要定期清理
+ */
+async function cleanupIncompleteTebiUploads() {
+  try {
+    console.log('开始清理Tebi中超过2小时的未完成分段上传...');
+    
+    // 查询所有未完成的分段上传（只查询 videos/ 前缀的）
+    const listResult = await listMultipartUploads('videos/');
+    if (!listResult.success) {
+      console.error('查询未完成上传失败:', listResult.error);
+      return;
+    }
+    
+    const uploads = listResult.uploads || [];
+    const now = new Date();
+    const twoHours = 2 * 60 * 60 * 1000; // 2小时的毫秒数
+    let cleanedCount = 0;
+    let skippedCount = 0;
+    
+    for (const upload of uploads) {
+      const initiatedTime = new Date(upload.Initiated);
+      const timeDiff = now.getTime() - initiatedTime.getTime();
+      
+      // 如果超过2小时，清理这个未完成的上传
+      if (timeDiff > twoHours) {
+        try {
+          const abortResult = await abortMultipartUpload(upload.Key, upload.UploadId);
+          if (abortResult.success) {
+            console.log(`✅ 清理未完成的上传: ${upload.Key} (上传ID: ${upload.UploadId}, 创建时间: ${initiatedTime.toISOString()})`);
+            cleanedCount++;
+          } else {
+            console.error(`❌ 清理失败: ${upload.Key} - ${abortResult.error}`);
+          }
+        } catch (error) {
+          console.error(`❌ 清理未完成上传时出错: ${upload.Key} - ${error.message}`);
+        }
+      } else {
+        skippedCount++;
+      }
+    }
+    
+    if (cleanedCount > 0 || skippedCount > 0) {
+      console.log(`Tebi分段上传清理完成，共清理 ${cleanedCount} 个，跳过 ${skippedCount} 个（未超过2小时）`);
+    } else if (uploads.length === 0) {
+      console.log('Tebi中没有未完成的分段上传');
+    }
+  } catch (error) {
+    console.error('清理Tebi未完成上传失败:', error);
+  }
+}
+
+// 设置定期清理任务 - 每2小时执行一次
+setInterval(cleanupIncompleteTebiUploads, 2 * 60 * 60 * 1000);
+
+// 应用启动后5秒执行首次清理
+setTimeout(cleanupIncompleteTebiUploads, 5000);
 
 /**
  * 获取所有视频分类
- * @param {import('express').Request} req
- * @param {import('express').Response} res
  */
-exports.getCategories = async (req, res) => {
+exports.getCategories = async (req, res, next) => {
   try {
-    const result = await db.query(
-      "SELECT id, name FROM categories ORDER BY id ASC"
-    );
-    res.success(result, "获取分类列表成功", 200);
+    const result = await db.query('SELECT id, name FROM categories ORDER BY id ASC');
+    res.success(result, '获取分类列表成功');
   } catch (error) {
-    console.error("获取分类列表失败:", error);
-    res.fail("获取分类列表失败", 500);
+    next(error);
   }
 };
 
 /**
- * 根据分类获取视频列表（分页）
- * @param {import('express').Request} req
- * @param {import('express').Response} res
+ * 根据分类获取视频列表
  */
- exports.getVideosByCategory = async (req, res) => {
+exports.getVideosByCategory = async (req, res, next) => {
   try {
-    const { categoryId, page = 1, pageSize = 10 } = req.query;
+    const { categoryId } = req.query;
+    let query, params;
 
-    if (!categoryId) {
-      return res.fail("必须提供 categoryId 参数", 400);
+    if (categoryId) {
+      query = 'SELECT * FROM videos WHERE category_id = ? ORDER BY id DESC';
+      params = [categoryId];
+    } else {
+      query = 'SELECT * FROM videos ORDER BY id DESC';
+      params = [];
     }
 
-    // 确保所有分页参数为整数
-    const parsedCategoryId = parseInt(categoryId, 10);
-    const parsedPage = parseInt(page, 10);
-    const parsedPageSize = parseInt(pageSize, 10);
-
-    if (isNaN(parsedCategoryId)) {
-      return res.fail("categoryId 必须是有效的数字", 400);
-    }
-
-    if (isNaN(parsedPage) || parsedPage < 1 || isNaN(parsedPageSize) || parsedPageSize < 1) {
-      return res.fail("页码和每页大小参数无效", 400);
-    }
-
-    const offset = (parsedPage - 1) * parsedPageSize;
-
-    // 注意：在 MySQL 预处理语句中，LIMIT/OFFSET 不支持使用占位符。
-    // 因此将它们拼接为经过验证的整数常量，仅对 categoryId 使用占位符。
-    const videosSql =
-      `SELECT id, title, description, category, cover_url, view_count, created_at, video_url 
-       FROM videos 
-       WHERE category_id = ? 
-       ORDER BY created_at DESC 
-       LIMIT ${parsedPageSize} OFFSET ${offset}`;
-
-    const [videos, countResult] = await Promise.all([
-      db.query(videosSql, [parsedCategoryId]),
-      db.query("SELECT COUNT(*) as count FROM videos WHERE category_id = ?", [parsedCategoryId])
-    ]);
-
-    const totalRecords = countResult[0].count;
-    const totalPages = Math.ceil(totalRecords / parsedPageSize);
-
-    const pagination = {
-      currentPage: parsedPage,
-      pageSize: parsedPageSize,
-      totalRecords,
-      totalPages,
-    };
-
-    res.success(videos, "获取视频列表成功", 200, { pagination });
+    const result = await db.query(query, params);
+    res.success(result, '获取视频列表成功');
   } catch (error) {
-    console.error("获取视频列表失败:", error);
-    res.fail("获取视频列表失败", 500);
+    next(error);
   }
 };
 
 /**
- * 根据 ID 获取单个视频详情
- * @param {import('express').Request} req
- * @param {import('express').Response} res
+ * 根据ID获取视频详情
  */
-exports.getVideoById = async (req, res) => {
+exports.getVideoById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!id) {
-      return res.fail("必须提供视频 ID", 400);
-    }
-
-    const [video] = await db.query("SELECT * FROM videos WHERE id = ?", [id]);
+    const [video] = await db.query('SELECT * FROM videos WHERE id = ?', [id]);
 
     if (!video) {
-      return res.fail("视频未找到", 404);
+      return res.fail('视频不存在', 404);
     }
 
-    // 数据库已存完整URL，直接返回
-    res.success(video, "获取视频详情成功");
+    res.success(video, '获取视频详情成功');
   } catch (error) {
-    console.error("获取视频详情失败:", error);
-    res.fail("获取视频详情失败", 500);
+    next(error);
   }
 };
 
 /**
- * 处理视频分片上传
- * @param {import('express').Request} req
- * @param {import('express').Response} res
+ * 获取所有视频（管理用）
  */
-exports.handleVideoChunkUpload = async (req, res) => {
+exports.getAllVideos = async (req, res, next) => {
   try {
-    const { chunkIndex, totalChunks, fileName } = req.body;
-    const file = req.file;
-
-    if (!file || chunkIndex === undefined || !totalChunks || !fileName) {
-      return res.fail("参数不完整", 400);
-    }
-
-    const chunkPath = path.join(CHUNK_DIR, fileName);
-    fs.mkdirSync(chunkPath, { recursive: true });
-    fs.renameSync(file.path, path.join(chunkPath, `${chunkIndex}.part`));
-    
-    console.log(`分片上传完成: 文件名=${fileName}, 分片索引=${chunkIndex}, 总分片数=${totalChunks}`);
-    res.success({ chunkIndex }, `视频分片 ${chunkIndex} 上传成功`);
-  } catch (e) {
-    console.error(`分片上传失败:`, e);
-    res.fail(`分片上传失败: ${e.message}`, 500);
-  }
-};
-
-/**
- * 合并视频分片
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- */
-exports.handleVideoMergeChunks = async (req, res) => {
-  try {
-    const { fileName, totalChunks, title, description, category_id, categoryId } = req.body;
-    const finalCategoryId = categoryId || category_id;
-    const coverFile = req.file;
-
-    if (!fileName || !totalChunks || !title || !finalCategoryId) {
-      return res.fail("参数缺失", 400);
-    }
-
-    // 合并分片
-    const chunkDir = path.join(CHUNK_DIR, fileName);
-    const tempOutputPath = path.join(UPLOADS_DIR, `${Date.now()}-${fileName}`);
-    
-    if (!fs.existsSync(chunkDir)) {
-      throw new Error(`分片目录不存在: ${chunkDir}`);
-    }
-
-    // 检查分片完整性
-    const files = fs
-      .readdirSync(chunkDir)
-      .sort((a, b) => Number(a.split(".")[0]) - Number(b.split(".")[0]));
-    
-    if (files.length !== Number(totalChunks)) {
-      throw new Error(`分片数量不匹配: 期望=${totalChunks}, 实际=${files.length}`);
-    }
-
-    // 合并分片到临时文件
-    const writeStream = fs.createWriteStream(tempOutputPath);
-    for (const file of files) {
-      const readStream = fs.createReadStream(path.join(chunkDir, file));
-      await new Promise((resolve, reject) => {
-        readStream.pipe(writeStream, { end: false });
-        readStream.on("end", resolve);
-        readStream.on("error", reject);
-      });
-    }
-    writeStream.end();
-    await new Promise((resolve) => writeStream.on("finish", resolve));
-
-    // 清理分片目录
-    fs.rmSync(chunkDir, { recursive: true, force: true });
-
-    // 上传视频（路径：videos/xxx.mp4）
-    const videoKey = `videos/${fileName}`;
-    const videoUrl = getPublicUrl(videoKey); // 完整URL: https://.../videos/xxx.mp4
-    const videoBuffer = fs.readFileSync(tempOutputPath);
-    const videoUploadResult = await uploadToTebi(
-      videoBuffer,
-      videoKey,
-      getContentType(fileName)
-    );
-    
-    if (!videoUploadResult.success) {
-      throw new Error(`视频上传到Tebi失败: ${videoUploadResult.error}`);
-    }
-    console.log(`视频上传成功: ${videoUrl}`);
-
-    // 处理封面（路径：videos/covers/xxx.jpg）
-    let coverUrl = null;
-    if (coverFile) {
-      // 用户上传封面
-      const coverFileName = `${Date.now()}-${coverFile.filename}`;
-      const coverKey = `videos/covers/${coverFileName}`; // 封面路径：videos/covers/
-      coverUrl = getPublicUrl(coverKey); // 完整URL: https://.../videos/covers/xxx.jpg
-      
-      const coverBuffer = fs.readFileSync(coverFile.path);
-      const coverUploadResult = await uploadToTebi(
-        coverBuffer,
-        coverKey,
-        coverFile.mimetype || "image/jpeg"
-      );
-      
-      if (!coverUploadResult.success) {
-        throw new Error(`封面上传失败: ${coverUploadResult.error}`);
-      }
-      console.log(`封面上传成功: ${coverUrl}`);
-      
-      // 清理封面临时文件
-      fs.unlinkSync(coverFile.path);
-    } else {
-      // 自动提取视频帧作为封面
-      const tempCoverPath = path.join(UPLOADS_DIR, `${Date.now()}-autocover.jpg`);
-      try {
-        await new Promise((resolve, reject) => {
-          ffmpeg(tempOutputPath)
-            .on("end", resolve)
-            .on("error", (err) => reject(err))
-            .screenshots({
-              timestamps: ["1"], // 第1秒帧
-              filename: path.basename(tempCoverPath),
-              folder: UPLOADS_DIR,
-              size: "320x240",
-            });
-        });
-        
-        const coverKey = `videos/covers/${path.basename(tempCoverPath)}`; // 封面路径：videos/covers/
-        coverUrl = getPublicUrl(coverKey); // 完整URL
-        const coverBuffer = fs.readFileSync(tempCoverPath);
-        const coverUploadResult = await uploadToTebi(
-          coverBuffer,
-          coverKey,
-          "image/jpeg"
-        );
-        
-        if (!coverUploadResult.success) {
-          throw new Error(`封面上传失败: ${coverUploadResult.error}`);
-        }
-        console.log(`自动提取封面成功: ${coverUrl}`);
-        
-        // 清理临时封面
-        fs.unlinkSync(tempCoverPath);
-      } catch (e) {
-        console.warn("自动提取封面失败，不保存封面图:", e.message);
-      }
-    }
-
-    // 清理临时视频文件
-    fs.unlinkSync(tempOutputPath);
-
-    // 查询分类名
-    const [categoryRow] = await db.query(
-      "SELECT name FROM categories WHERE id = ?",
-      [finalCategoryId]
-    );
-    if (!categoryRow) {
-      return res.fail("分类不存在", 400);
-    }
-    const categoryName = categoryRow.name;
-
-    // 存入数据库（完整URL）
-    const result = await db.query(
-      "INSERT INTO videos (title, description, category, category_id, video_url, cover_url) VALUES (?, ?, ?, ?, ?, ?)",
-      [title, description, categoryName, finalCategoryId, videoUrl, coverUrl]
-    );
-    const insertId = result.insertId;
-    const [newVideo] = await db.query("SELECT * FROM videos WHERE id = ?", [insertId]);
-
-    res.success(newVideo, "视频上传成功", 200);
+    const result = await db.query('SELECT * FROM videos ORDER BY id DESC');
+    res.success(result, '获取所有视频成功');
   } catch (error) {
-    console.error("视频合并失败:", error);
-    res.fail(`视频合并失败: ${error.message}`, 500);
+    next(error);
   }
 };
 
 /**
- * 获取文件的MIME类型
+ * 上传视频（已弃用，请使用分片上传）
  */
-function getContentType(filename) {
-  const extension = path.extname(filename).toLowerCase();
-  const mimeTypes = {
-    '.mp4': 'video/mp4',
-    '.avi': 'video/x-msvideo',
-    '.mov': 'video/quicktime',
-    '.wmv': 'video/x-ms-wmv',
-    '.flv': 'video/x-flv',
-    '.mkv': 'video/x-matroska',
-    '.webm': 'video/webm'
-  };
-  return mimeTypes[extension] || 'application/octet-stream';
-}
-
-/**
- * [后台管理] 上传新视频
- */
-exports.uploadVideo = async (req, res) => {
+exports.uploadVideo = async (req, res, next) => {
   try {
-    const { title, description, category_id, categoryId } = req.body;
-    const finalCategoryId = categoryId || category_id;
-    const videoFile = req.files?.videoFile?.[0];
-    const coverFile = req.files?.coverFile?.[0];
+    const { title, description, categoryId } = req.body;
+    const videoFile = req.files && req.files.videoFile ? req.files.videoFile[0] : null;
+    const coverFile = req.files && req.files.coverFile ? req.files.coverFile[0] : null;
 
-    if (!title || !finalCategoryId || !videoFile) {
+    // 校验 categoryId
+    if (!title || !categoryId || !videoFile) {
       return res.fail("标题、分类和视频文件均为必填项", 400);
     }
 
-    // 查询分类名
-    const [categoryRow] = await db.query(
-      "SELECT name FROM categories WHERE id = ?",
-      [finalCategoryId]
-    );
+    // 校验分类是否存在
+    const [categoryRow] = await db.query("SELECT name FROM categories WHERE id = ?", [categoryId]);
     if (!categoryRow) {
-      // 清理临时文件
-      if (videoFile?.path) fs.unlinkSync(videoFile.path);
-      if (coverFile?.path) fs.unlinkSync(coverFile.path);
       return res.fail("分类不存在", 400);
     }
-    const categoryName = categoryRow.name;
 
-    // 上传视频（路径：videos/xxx.mp4）
-    const videoFilename = `videos/${videoFile.filename}`;
-    const videoUrl = getPublicUrl(videoFilename); // 完整URL
-    const videoBuffer = fs.readFileSync(videoFile.path);
-    const videoUploadResult = await uploadToTebi(
-      videoBuffer,
-      videoFilename,
-      getContentType(videoFile.filename)
-    );
-    
-    if (!videoUploadResult.success) {
-      throw new Error(`视频上传失败: ${videoUploadResult.error}`);
-    }
-    console.log(`视频上传成功: ${videoUrl}`);
+    const videoUrl = `${pdfbseUrl}/uploads/${videoFile.filename}`;
+    const coverUrl = coverFile ? `${pdfbseUrl}/uploads/${coverFile.filename}` : null;
 
-    // 处理封面（路径：videos/covers/xxx.jpg）
-    let coverUrl = null;
-    if (coverFile) {
-      // 用户上传封面
-      const coverFilename = `videos/covers/${coverFile.filename}`; // 封面路径：videos/covers/
-      coverUrl = getPublicUrl(coverFilename); // 完整URL
-      
-      const coverBuffer = fs.readFileSync(coverFile.path);
-      const coverUploadResult = await uploadToTebi(
-        coverBuffer,
-        coverFilename,
-        coverFile.mimetype || "image/jpeg"
-      );
-      
-      if (!coverUploadResult.success) {
-        throw new Error(`封面上传失败: ${coverUploadResult.error}`);
-      }
-      // 清理封面临时文件
-      fs.unlinkSync(coverFile.path);
-    } else {
-      // 自动提取封面
-      const tempCoverPath = path.join(UPLOADS_DIR, `${Date.now()}-autocover.jpg`);
-      try {
-        await new Promise((resolve, reject) => {
-          ffmpeg(videoFile.path)
-            .on("end", resolve)
-            .on("error", (err) => reject(err))
-            .screenshots({
-              timestamps: ["1"],
-              filename: path.basename(tempCoverPath),
-              folder: UPLOADS_DIR,
-              size: "320x240",
-            });
-        });
-        
-        const coverFilename = `videos/covers/${path.basename(tempCoverPath)}`; // 封面路径：videos/covers/
-        coverUrl = getPublicUrl(coverFilename); // 完整URL
-        const coverBuffer = fs.readFileSync(tempCoverPath);
-        const coverUploadResult = await uploadToTebi(
-          coverBuffer,
-          coverFilename,
-          "image/jpeg"
-        );
-        
-        if (!coverUploadResult.success) {
-          throw new Error(`封面上传失败: ${coverUploadResult.error}`);
-        }
-        // 清理临时封面
-        fs.unlinkSync(tempCoverPath);
-      } catch (e) {
-        console.warn("自动提取封面失败，不保存封面图:", e.message);
-      }
-    }
-
-    // 清理视频临时文件
-    fs.unlinkSync(videoFile.path);
-
-    // 存入数据库（完整URL）
+    // 存库时用 categoryId 和 categoryRow.name
     const result = await db.query(
       "INSERT INTO videos (title, description, category, category_id, video_url, cover_url) VALUES (?, ?, ?, ?, ?, ?)",
-      [title, description, categoryName, finalCategoryId, videoUrl, coverUrl]
-    );
-    const insertId = result.insertId;
-    const [newVideo] = await db.query("SELECT * FROM videos WHERE id = ?", [insertId]);
-
-    res.success(newVideo, "视频上传成功", 200);
-  } catch (error) {
-    console.error("视频上传失败:", error);
-    // 清理临时文件
-    if (req.files?.videoFile?.[0]?.path) {
-      fs.unlink(req.files.videoFile[0].path, (err) => err && console.warn("清理视频失败:", err));
-    }
-    if (req.files?.coverFile?.[0]?.path) {
-      fs.unlink(req.files.coverFile[0].path, (err) => err && console.warn("清理封面失败:", err));
-    }
-    res.fail(`视频上传失败: ${error.message}`, 500);
-  }
-};
-
-/**
- * [后台管理] 删除视频
- */
-exports.deleteVideo = async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!id) {
-      return res.fail("必须提供视频ID", 400);
-    }
-
-    // 查询视频信息（完整URL）
-    const [video] = await db.query(
-      "SELECT video_url, cover_url FROM videos WHERE id = ?",
-      [id]
-    );
-    if (!video) {
-      return res.fail("视频不存在", 404);
-    }
-
-    // 删除Tebi视频（从URL提取键）
-    if (video.video_url) {
-      console.log(`===== 开始删除视频文件 =====`);
-      console.log(`视频URL: ${video.video_url}`);
-      try {
-        const videoKey = getKeyFromUrl(video.video_url);
-        console.log(`提取到的视频文件键: ${videoKey}`);
-        
-        if (!videoKey) {
-          console.error(`无法提取有效的视频文件键，跳过删除`);
-        } else {
-          console.log(`调用deleteFromTebi删除视频文件`);
-          const deleteResult = await deleteFromTebi(videoKey);
-          console.log(`deleteFromTebi返回结果:`, deleteResult);
-          
-          if (deleteResult.success) {
-            console.log(`✅ 视频文件删除成功`);
-          } else {
-            console.warn(`❌ 视频文件删除失败: ${deleteResult.error}`);
-          }
-        }
-      } catch (e) {
-        console.error(`❌ 删除视频过程中异常: ${e.message}`);
-        console.error(e.stack);
-      }
-      console.log(`===== 视频文件删除处理完成 =====`);
-    }
-
-    // 删除Tebi封面（从URL提取键）
-    if (video.cover_url) {
-      console.log(`===== 开始删除封面文件 =====`);
-      console.log(`封面URL: ${video.cover_url}`);
-      try {
-        const coverKey = getKeyFromUrl(video.cover_url);
-        console.log(`提取到的封面文件键: ${coverKey}`);
-        
-        if (!coverKey) {
-          console.error(`无法提取有效的封面文件键，跳过删除`);
-        } else {
-          console.log(`调用deleteFromTebi删除封面文件`);
-          const deleteResult = await deleteFromTebi(coverKey);
-          console.log(`deleteFromTebi返回结果:`, deleteResult);
-          
-          if (deleteResult.success) {
-            console.log(`✅ 封面文件删除成功`);
-          } else {
-            console.warn(`❌ 封面文件删除失败: ${deleteResult.error}`);
-          }
-        }
-      } catch (e) {
-        console.error(`❌ 删除封面过程中异常: ${e.message}`);
-        console.error(e.stack);
-      }
-      console.log(`===== 封面文件删除处理完成 =====`);
-    }
-
-    // 删除数据库记录
-    await db.query("DELETE FROM videos WHERE id = ?", [id]);
-
-    res.success(null, "视频删除成功");
-  } catch (error) {
-    console.error("删除视频失败:", error);
-    res.fail(`视频删除失败: ${error.message}`, 500);
-  }
-};
-
-/**
- * [后台管理] 添加分类
- */
-exports.addCategory = async (req, res) => {
-  try {
-    const { name } = req.body;
-    if (!name?.trim()) {
-      return res.fail("分类名不能为空", 400);
-    }
-    // 检查是否已存在
-    const [exist] = await db.query("SELECT id FROM categories WHERE name = ?", [name.trim()]);
-    if (exist) {
-      return res.fail("分类已存在", 409);
-    }
-    const result = await db.query("INSERT INTO categories (name) VALUES (?)", [name.trim()]);
-    res.success({ id: result.insertId, name: name.trim() }, "分类添加成功");
-  } catch (error) {
-    console.error("添加分类失败:", error);
-    res.fail("添加分类失败", 500);
-  }
-};
-
-/**
- * [后台管理] 获取所有视频（带分页）
- */
-exports.getAllVideos = async (req, res) => {
-  try {
-    // 最基本的参数处理方式
-    let page = Number(req.query.page) || 1;
-    let limit = Number(req.query.limit) || 10;
-    
-    // 确保参数为有效的正整数
-    page = page < 1 ? 1 : Math.floor(page);
-    limit = limit < 1 ? 10 : limit > 100 ? 100 : Math.floor(limit);
-    const offset = Math.floor((page - 1) * limit);
-    
-    // 调试日志
-    console.log(`分页参数 - page: ${page}, limit: ${limit}, offset: ${offset}`);
-    
-    // 获取总数 - 这个查询似乎正常工作
-    const [totalResult] = await db.query("SELECT COUNT(*) as count FROM videos");
-    const total = totalResult.count;
-    
-    // 尝试不同的查询方式，避免预处理语句参数问题
-    // 直接拼接到SQL中（仅适用于数字参数，避免SQL注入风险）
-    const videos = await db.query(
-      `SELECT * FROM videos ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
+      [title, description || '', categoryRow.name, categoryId, videoUrl, coverUrl]
     );
 
- 
-
-
-
-  const pagination = {
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      totalPages: Math.ceil(total / limit)
-    };
-
-     res.success(videos, "获取视频列表成功", 200, { pagination });
+    const [newVideo] = await db.query("SELECT * FROM videos WHERE id = ?", [result.insertId]);
+    res.success(newVideo, "视频上传成功");
   } catch (error) {
-    console.error("获取视频列表失败:", error);
-    res.fail("服务器内部错误", 500);
+    next(error);
   }
 };
 
-
-
 /**
- * [后台管理] 更新视频信息
+ * 更新视频信息
  */
-exports.updateVideo = async (req, res) => {
+exports.updateVideo = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { title, description, categoryId } = req.body;
-    
-    if (!id) return res.fail("必须提供视频ID", 400);
-    
+
     // 检查视频是否存在
-    const [video] = await db.query("SELECT * FROM videos WHERE id = ?", [id]);
-    if (!video) return res.fail("视频不存在", 404);
-    
-    // 准备更新字段
+    const [video] = await db.query('SELECT * FROM videos WHERE id = ?', [id]);
+    if (!video) {
+      return res.fail('视频不存在', 404);
+    }
+
+    // 如果提供了分类ID，验证分类是否存在
+    let categoryName = video.category;
+    if (categoryId) {
+      const [categoryRow] = await db.query("SELECT name FROM categories WHERE id = ?", [categoryId]);
+      if (!categoryRow) {
+        return res.fail("分类不存在", 400);
+      }
+      categoryName = categoryRow.name;
+    }
+
+    // 更新视频信息
     const updateFields = [];
     const updateValues = [];
-    
+
     if (title) {
-      updateFields.push("title = ?");
+      updateFields.push('title = ?');
       updateValues.push(title);
     }
-    if (description) {
-      updateFields.push("description = ?");
+    if (description !== undefined) {
+      updateFields.push('description = ?');
       updateValues.push(description);
     }
     if (categoryId) {
-      const [category] = await db.query("SELECT name FROM categories WHERE id = ?", [categoryId]);
-      if (!category) return res.fail("分类不存在", 404);
-      updateFields.push("category_id = ?, category = ?");
-      updateValues.push(categoryId, category.name);
+      updateFields.push('category_id = ?');
+      updateFields.push('category = ?');
+      updateValues.push(categoryId);
+      updateValues.push(categoryName);
     }
-    
-    // 处理视频更新
-    if (req.files?.video) {
-      const videoFile = req.files.video;
-      const timestamp = Date.now();
-      const videoFilename = `videos/${timestamp}_${videoFile.name}`; // 视频路径：videos/
-      const videoUrl = getPublicUrl(videoFilename); // 完整URL
-      
-      const videoBuffer = fs.readFileSync(videoFile.path);
-      const videoUploadResult = await uploadToTebi(
-        videoBuffer,
-        videoFilename,
-        getContentType(videoFile.name)
-      );
-      
-      if (!videoUploadResult.success) {
-        return res.fail(`视频上传失败: ${videoUploadResult.error}`, 500);
-      }
-      
-      // 删除原视频
-      if (video.video_url) {
-        try {
-          const oldKey = getKeyFromUrl(video.video_url);
-          await deleteFromTebi(oldKey);
-          console.log(`删除原视频成功: ${video.video_url}`);
-        } catch (e) {
-          console.error(`删除原视频异常: ${e.message}`);
-        }
-      }
-      
-      updateFields.push("video_url = ?");
-      updateValues.push(videoUrl);
-      fs.unlinkSync(videoFile.path); // 清理临时文件
+
+    if (updateFields.length === 0) {
+      return res.fail('没有需要更新的字段', 400);
     }
-    
-    // 处理封面更新（路径：videos/covers/xxx.jpg）
-    if (req.files?.cover) {
-      const coverFile = req.files.cover;
-      const timestamp = Date.now();
-      const coverFilename = `videos/covers/${timestamp}_${coverFile.name}`; // 封面路径：videos/covers/
-      const coverUrl = getPublicUrl(coverFilename); // 完整URL
-      
-      const coverBuffer = fs.readFileSync(coverFile.path);
-      const coverUploadResult = await uploadToTebi(
-        coverBuffer,
-        coverFilename,
-        coverFile.mimetype || "image/jpeg"
-      );
-      
-      if (!coverUploadResult.success) {
-        return res.fail(`封面上传失败: ${coverUploadResult.error}`, 500);
-      }
-      
-      // 删除原封面
-      if (video.cover_url) {
-        try {
-          const oldKey = getKeyFromUrl(video.cover_url);
-          await deleteFromTebi(oldKey);
-          console.log(`删除原封面成功: ${video.cover_url}`);
-        } catch (e) {
-          console.error(`删除原封面异常: ${e.message}`);
-        }
-      }
-      
-      updateFields.push("cover_url = ?");
-      updateValues.push(coverUrl);
-      fs.unlinkSync(coverFile.path); // 清理临时文件
-    }
-    
-    // 执行更新
-    if (updateFields.length > 0) {
-      updateValues.push(id);
-      const result = await db.query(
-        `UPDATE videos SET ${updateFields.join(", ")} WHERE id = ?`,
-        updateValues
-      );
-      
-      if (result.affectedRows === 0) {
-        return res.fail("视频不存在或数据未改变", 404);
-      }
-    }
-    
-    res.success(null, "视频更新成功");
+
+    updateValues.push(id);
+    const query = `UPDATE videos SET ${updateFields.join(', ')} WHERE id = ?`;
+    await db.query(query, updateValues);
+
+    const [updatedVideo] = await db.query('SELECT * FROM videos WHERE id = ?', [id]);
+    res.success(updatedVideo, '视频信息更新成功');
   } catch (error) {
-    console.error("更新视频失败:", error);
-    // 清理临时文件
-    if (req.files?.video) fs.unlinkSync(req.files.video.path);
-    if (req.files?.cover) fs.unlinkSync(req.files.cover.path);
-    res.fail("服务器内部错误", 500);
+    next(error);
   }
 };
 
 /**
- * [后台管理] 删除视频分类
+ * 删除视频
  */
-exports.deleteCategory = async (req, res) => {
+exports.deleteVideo = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!id) {
-      return res.json({ code: 400, message: "必须提供分类ID" });
+
+    // 检查视频是否存在
+    const [video] = await db.query('SELECT * FROM videos WHERE id = ?', [id]);
+    if (!video) {
+      return res.fail('视频不存在', 404);
     }
-    // 检查分类下是否有视频
-    const [video] = await db.query("SELECT id FROM videos WHERE category_id = ?", [id]);
-    if (video) {
-      return res.fail("该分类下存在视频，无法删除", 409);
-    }
-    // 删除分类
-    const result = await db.query("DELETE FROM categories WHERE id = ?", [id]);
-    if (result.affectedRows === 0) {
-      return res.fail("分类不存在或已删除", 404);
-    }
-    res.success({}, "删除成功");
+
+    // 删除视频记录
+    await db.query('DELETE FROM videos WHERE id = ?', [id]);
+
+    // 可选：删除文件系统中的视频文件和封面文件
+    // 这里可以根据需要添加文件删除逻辑
+
+    res.success(null, '视频删除成功');
   } catch (error) {
-    console.error("删除分类失败:", error);
-    res.fail("删除分类失败", 500);
+    next(error);
+  }
+};
+
+/**
+ * 添加视频分类
+ */
+exports.addCategory = async (req, res, next) => {
+  try {
+    const { name } = req.body;
+
+    if (!name) {
+      return res.fail('分类名称不能为空', 400);
+    }
+
+    // 检查分类是否已存在
+    const [existing] = await db.query('SELECT * FROM categories WHERE name = ?', [name]);
+    if (existing) {
+      return res.fail('分类名称已存在', 400);
+    }
+
+    const result = await db.query('INSERT INTO categories (name) VALUES (?)', [name]);
+    const [newCategory] = await db.query('SELECT * FROM categories WHERE id = ?', [result.insertId]);
+
+    res.success(newCategory, '分类添加成功');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 删除视频分类
+ */
+exports.deleteCategory = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // 检查分类是否存在
+    const [category] = await db.query('SELECT * FROM categories WHERE id = ?', [id]);
+    if (!category) {
+      return res.fail('分类不存在', 404);
+    }
+
+    // 检查是否有视频使用该分类
+    const [videos] = await db.query('SELECT COUNT(*) as count FROM videos WHERE category_id = ?', [id]);
+    if (videos && videos.count > 0) {
+      return res.fail('该分类下还有视频，无法删除', 400);
+    }
+
+    // 删除分类
+    await db.query('DELETE FROM categories WHERE id = ?', [id]);
+
+    res.success(null, '分类删除成功');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 初始化Tebi分段上传（用于断点续传）
+ */
+exports.initVideoUpload = async (req, res) => {
+  try {
+    const { fileName, contentType, totalChunks } = req.body;
+
+    if (!fileName || !contentType) {
+      return res.fail('缺少 fileName 或 contentType 参数', 400);
+    }
+
+    // 生成唯一的文件键名
+    const timestamp = Date.now();
+    const randomStr = Math.round(Math.random() * 1e9);
+    const ext = path.extname(fileName);
+    const fileKey = `videos/${timestamp}-${randomStr}${ext}`;
+
+    // 初始化Tebi分段上传
+    const initResult = await initiateMultipartUpload(fileKey, contentType);
+    if (!initResult.success) {
+      return res.fail(`初始化上传失败: ${initResult.error}`, 500);
+    }
+
+    // 将上传信息存储到数据库（临时表或使用videos表的一个临时字段）
+    // 这里我们使用一个简单的内存存储，生产环境建议使用数据库
+    // 暂时先返回，让前端保存uploadId和fileKey
+
+    res.success({
+      uploadId: initResult.uploadId,
+      fileKey: fileKey,
+      fileName: fileName
+    }, '初始化上传成功');
+  } catch (error) {
+    console.error('初始化上传失败:', error);
+    res.fail(`初始化失败: ${error.message}`, 500);
+  }
+};
+
+/**
+ * 检查已上传的分片（用于断点续传）- 从Tebi查询
+ */
+exports.checkVideoChunks = async (req, res) => {
+  try {
+    const { fileKey, uploadId } = req.query;
+
+    if (!fileKey || !uploadId) {
+      return res.fail('缺少 fileKey 或 uploadId 参数', 400);
+    }
+
+    // 从Tebi查询已上传的分片
+    const partsResult = await listUploadedParts(fileKey, uploadId);
+    if (!partsResult.success) {
+      return res.fail(`查询失败: ${partsResult.error}`, 500);
+    }
+
+    // 提取已上传的分片编号（PartNumber从1开始，前端使用从0开始）
+    const uploadedChunks = partsResult.uploadedParts.map(part => part.PartNumber - 1);
+
+    res.success({ 
+      uploadedChunks: uploadedChunks,
+      totalChunks: uploadedChunks.length,
+      parts: partsResult.uploadedParts
+    }, `已找到 ${uploadedChunks.length} 个已上传的分片`);
+  } catch (error) {
+    console.error('检查分片失败:', error);
+    res.fail(`检查失败: ${error.message}`, 500);
+  }
+};
+
+/**
+ * 分片上传处理（直接上传到Tebi，支持断点续传）
+ */
+exports.handleVideoChunkUpload = async (req, res) => {
+  try {
+    const { chunkIndex, totalChunks, fileKey, uploadId } = req.body;
+    const file = req.file;
+
+    if (!file || chunkIndex === undefined || !totalChunks || !fileKey || !uploadId) {
+      return res.fail('参数不完整：需要 chunkIndex, totalChunks, fileKey, uploadId', 400);
+    }
+
+    // 检查分片是否已上传到Tebi（断点续传）
+    const partsResult = await listUploadedParts(fileKey, uploadId);
+    if (partsResult.success) {
+      const partNumber = parseInt(chunkIndex) + 1; // Tebi的PartNumber从1开始
+      const existingPart = partsResult.uploadedParts.find(p => p.PartNumber === partNumber);
+      
+      if (existingPart) {
+        // 删除临时文件
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+        
+        return res.success({ 
+          chunkIndex, 
+          skipped: true,
+          ETag: existingPart.ETag,
+          PartNumber: partNumber
+        }, `分片 ${chunkIndex} 已存在于Tebi，跳过上传`);
+      }
+    }
+
+    // 读取分片内容
+    const chunkBuffer = fs.readFileSync(file.path);
+    
+    // 删除临时文件
+    fs.unlinkSync(file.path);
+
+    // 上传分片到Tebi（PartNumber从1开始）
+    const partNumber = parseInt(chunkIndex) + 1;
+    const uploadResult = await uploadPart(fileKey, uploadId, partNumber, chunkBuffer);
+
+    if (!uploadResult.success) {
+      return res.fail(`上传分片失败: ${uploadResult.error}`, 500);
+    }
+
+    res.success({ 
+      chunkIndex,
+      skipped: false,
+      ETag: uploadResult.ETag,
+      PartNumber: partNumber
+    }, `分片 ${chunkIndex} 上传到Tebi成功`);
+  } catch (error) {
+    console.error('分片上传失败:', error);
+    // 清理临时文件
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {
+        console.error('清理临时文件失败:', e);
+      }
+    }
+    res.fail(`上传失败: ${error.message}`, 500);
+  }
+};
+
+/**
+ * 完成Tebi分段上传并保存到数据库
+ */
+exports.handleVideoMergeChunks = async (req, res) => {
+  try {
+    const { fileKey, uploadId, totalChunks, title, description, categoryId, coverFile } = req.body;
+    const coverFileObj = req.file; // 封面文件（如果有）
+
+    if (!fileKey || !uploadId || !totalChunks || !title || !categoryId) {
+      return res.fail('参数缺失：fileKey、uploadId、totalChunks、title、categoryId 均为必填', 400);
+    }
+
+    // 验证分类是否存在
+    const [categoryRow] = await db.query("SELECT name FROM categories WHERE id = ?", [categoryId]);
+    if (!categoryRow) {
+      return res.fail("分类不存在", 400);
+    }
+
+    // 查询所有已上传的分片
+    const partsResult = await listUploadedParts(fileKey, uploadId);
+    if (!partsResult.success) {
+      return res.fail(`查询已上传分片失败: ${partsResult.error}`, 500);
+    }
+
+    const uploadedParts = partsResult.uploadedParts;
+    if (uploadedParts.length !== Number(totalChunks)) {
+      return res.fail(`分片数量不匹配：期望 ${totalChunks}，实际已上传 ${uploadedParts.length}`, 400);
+    }
+
+    // 按PartNumber排序
+    uploadedParts.sort((a, b) => a.PartNumber - b.PartNumber);
+
+    // 构建完成上传所需的Parts数组
+    const parts = uploadedParts.map(part => ({
+      ETag: part.ETag,
+      PartNumber: part.PartNumber
+    }));
+
+    // 完成Tebi分段上传
+    const completeResult = await completeMultipartUpload(fileKey, uploadId, parts);
+    if (!completeResult.success) {
+      return res.fail(`完成上传失败: ${completeResult.error}`, 500);
+    }
+
+    // 注意：completeMultipartUpload 成功后，分段上传记录会自动清理
+    // 分片会被合并成最终文件，分段上传记录不再存在
+    // 所以这里不需要手动清理，分段上传记录已经被自动删除了
+    console.log(`✅ 视频上传完成，分段上传记录已自动清理: ${fileKey}`);
+
+    const videoUrl = completeResult.url || getPublicUrl(fileKey);
+
+    // 处理封面文件
+    let coverUrl = null;
+    if (coverFileObj) {
+      // 上传封面到Tebi
+      const { uploadToTebi } = require('../../utils/tebiStorage');
+      const coverBuffer = fs.readFileSync(coverFileObj.path);
+      const coverFileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(coverFileObj.originalname)}`;
+      const coverUploadResult = await uploadToTebi(coverBuffer, `covers/${coverFileName}`, coverFileObj.mimetype);
+      
+      // 清理临时文件
+      fs.unlinkSync(coverFileObj.path);
+      
+      if (coverUploadResult.success) {
+        coverUrl = coverUploadResult.url;
+      }
+    } else if (coverFile) {
+      coverUrl = coverFile; // 如果已经提供了封面URL
+    }
+
+    // 保存到数据库
+    const result = await db.query(
+      "INSERT INTO videos (title, description, category, category_id, video_url, cover_url) VALUES (?, ?, ?, ?, ?, ?)",
+      [title, description || '', categoryRow.name, categoryId, videoUrl, coverUrl]
+    );
+
+    const [newVideo] = await db.query("SELECT * FROM videos WHERE id = ?", [result.insertId]);
+    res.success(newVideo, "视频上传成功");
+  } catch (error) {
+    console.error('完成上传失败:', error);
+    // 清理临时文件
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {
+        console.error('清理临时文件失败:', e);
+      }
+    }
+    res.fail(`完成上传失败: ${error.message}`, 500);
+  }
+};
+
+/**
+ * 手动清理分片文件
+ */
+exports.cleanupChunks = async (req, res) => {
+  try {
+    const { fileName } = req.body;
+    
+    if (fileName) {
+      // 清理指定文件的分片
+      const chunkDir = path.join(CHUNK_DIR, fileName);
+      if (fs.existsSync(chunkDir)) {
+        fs.rmSync(chunkDir, { recursive: true, force: true });
+        console.log(`手动清理分片目录: ${chunkDir}`);
+        return res.success(null, `分片清理成功: ${fileName}`);
+      } else {
+        return res.fail("分片目录不存在", 404);
+      }
+    } else {
+      // 清理所有超过2小时未使用的分片
+      cleanupOldChunks();
+      return res.success(null, "开始清理旧分片文件");
+    }
+  } catch (error) {
+    console.error("清理分片失败:", error);
+    res.fail(`清理分片失败: ${error.message}`, 500);
   }
 };
