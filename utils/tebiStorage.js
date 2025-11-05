@@ -8,6 +8,7 @@ const { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, G
         CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand,
         ListPartsCommand, ListMultipartUploadsCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { NodeHttpHandler } = require("@aws-sdk/node-http-handler");
 const tebiConfig = require('../config/tebiConfig');
 
 // 创建S3客户端
@@ -28,7 +29,13 @@ const s3Client = new S3Client({
   },
   forcePathStyle: true, // 上传时使用路径风格
   requestTimeout: 1800000, // 请求超时：30分钟
-  connectTimeout: 60000    // 连接超时：1分钟
+  connectTimeout: 60000,   // 连接超时：1分钟
+  maxAttempts: 5,
+  retryMode: 'standard',
+  requestHandler: new NodeHttpHandler({
+    connectionTimeout: 60000, // 60s 连接超时
+    socketTimeout: 120000     // 120s socket超时
+  })
 });
 
 /**
@@ -150,30 +157,37 @@ async function initiateMultipartUpload(filename, contentType) {
  * @returns {Promise<Object>} 包含ETag的对象
  */
 async function uploadPart(fileKey, uploadId, partNumber, buffer) {
-  try {
-    const command = new UploadPartCommand({
-      Bucket: tebiConfig.bucketName,
-      Key: fileKey,
-      UploadId: uploadId,
-      PartNumber: partNumber,
-      Body: buffer
-    });
-    
-    const response = await s3Client.send(command);
-    console.log(`分段 ${partNumber} 上传成功, ETag: ${response.ETag}`);
-    
-    return {
-      success: true,
-      ETag: response.ETag,
-      PartNumber: partNumber
-    };
-  } catch (error) {
-    console.error(`分段 ${partNumber} 上传失败:`, error);
-    return {
-      success: false,
-      error: error.message,
-      PartNumber: partNumber
-    };
+  const maxRetries = 4;
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    try {
+      const command = new UploadPartCommand({
+        Bucket: tebiConfig.bucketName,
+        Key: fileKey,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+        Body: buffer
+      });
+      const response = await s3Client.send(command);
+      console.log(`分段 ${partNumber} 上传成功, ETag: ${response.ETag}`);
+      return { success: true, ETag: response.ETag, PartNumber: partNumber };
+    } catch (error) {
+      const errMsg = error?.message || String(error);
+      const isTransient =
+        error?.code === 'ECONNRESET' ||
+        error?.name === 'TimeoutError' ||
+        /ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|socket hang up/i.test(errMsg);
+
+      if (attempt < maxRetries && isTransient) {
+        const backoffMs = Math.min(4000, 500 * Math.pow(2, attempt)) + Math.floor(Math.random() * 300);
+        console.warn(`分段 ${partNumber} 第${attempt + 1}次失败（将重试）：${errMsg}，退避 ${backoffMs}ms`);
+        await new Promise(r => setTimeout(r, backoffMs));
+        attempt++;
+        continue;
+      }
+      console.error(`分段 ${partNumber} 上传失败:`, error);
+      return { success: false, error: errMsg, PartNumber: partNumber };
+    }
   }
 }
 

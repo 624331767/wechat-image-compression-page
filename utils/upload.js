@@ -26,7 +26,15 @@ const storage = multer.diskStorage({
 });
 
 // 创建基础的 multer 实例
-const upload = multer({ storage });
+const upload = multer({
+    storage,
+    limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB 单个文件大小限制
+        fieldSize: 50 * 1024 * 1024, // 表单字段大小限制
+        parts: 100, // 最多100个字段
+        files: 10 // 最多10个文件
+    }
+});
 
 /**
  * 单文件上传中间件（字段名：file）
@@ -68,4 +76,4 @@ module.exports = {
     multiFiles,     // 多文件上传
     fieldsUpload,   // 多字段上传（视频+封面）
     customUpload    // 自定义上传
-}; 
+};

@@ -65,7 +65,7 @@ const appidArr = [{
     id: "wx86eefa441e87fc1f",
     test: "江西振兴纸品",
     url: "http://api.jxzxzp.cn",
-},
+}
 ];
 
 module.exports = { appidArr };

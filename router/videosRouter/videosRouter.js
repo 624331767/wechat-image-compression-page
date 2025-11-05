@@ -78,6 +78,7 @@ const {
   handleVideoChunkUpload,
   handleVideoMergeChunks,
   cleanupChunks,
+  getRandomVideo
 } = require("../../controllers/videos/index");
 const { crawl } = require("../../controllers/videos/crawler");
 // 引入标准化上传工具
@@ -107,8 +108,13 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  // 你可以在这里为视频和封面设置文件大小限制
-  // limits: { fileSize: 1024 * 1024 * 100 }, // 例如：限制文件大小为 100MB
+  // 支持大文件上传的配置
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB 单个文件大小限制
+    fieldSize: 50 * 1024 * 1024, // 表单字段大小限制
+    parts: 100, // 最多100个字段
+    files: 10 // 最多10个文件
+  }
 });
 
 /**
@@ -179,6 +185,9 @@ router.get("/categories", getCategories);
  *                     $ref: '#/components/schemas/Video'
  */
 router.get("/videos", getVideosByCategory);
+
+
+router.get('/videos/random', getRandomVideo);
 
 /**
  * @swagger

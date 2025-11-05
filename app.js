@@ -60,8 +60,16 @@ app.use(apiLoggerMiddleware);
 app.use(responseWrapper);
 
 // 5.4 请求体解析（JSON / URL-encoded）
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// 增加请求体大小限制，支持大文件上传
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+// 5.5 设置请求超时时间（30分钟）
+app.use((req, res, next) => {
+  req.setTimeout(30 * 60 * 1000); // 30分钟
+  res.setTimeout(30 * 60 * 1000); // 30分钟
+  next();
+});
 
 // 5.5 Swagger API 文档
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

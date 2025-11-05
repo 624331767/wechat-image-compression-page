@@ -146,25 +146,96 @@ exports.getCategories = async (req, res, next) => {
 /**
  * 根据分类获取视频列表
  */
-exports.getVideosByCategory = async (req, res, next) => {
+ 
+ exports.getVideosByCategory = async (req, res, next) => {
   try {
-    const { categoryId } = req.query;
-    let query, params;
+    const { categoryId, keyword } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const offset = (page - 1) * pageSize;
 
-    if (categoryId) {
-      query = 'SELECT * FROM videos WHERE category_id = ? ORDER BY id DESC';
-      params = [categoryId];
-    } else {
-      query = 'SELECT * FROM videos ORDER BY id DESC';
-      params = [];
+    // 拼接 WHERE 条件
+    let whereClause = '';
+    let params = [];
+
+    // 如果同时有分类ID和关键词，则添加AND条件
+    if (categoryId && keyword) {
+      whereClause = 'WHERE category_id = ? AND (title LIKE ? OR description LIKE ?)';
+      params.push(categoryId);
+      params.push(`%${keyword}%`);
+      params.push(`%${keyword}%`);
+    } else if (categoryId) {
+      // 只有分类ID
+      whereClause = 'WHERE category_id = ?';
+      params.push(categoryId);
+    } else if (keyword) {
+      // 只有关键词，搜索标题或描述
+      whereClause = 'WHERE title LIKE ? OR description LIKE ?';
+      params.push(`%${keyword}%`);
+      params.push(`%${keyword}%`);
     }
 
-    const result = await db.query(query, params);
-    res.success(result, '获取视频列表成功');
+    // 1️⃣ 查询总条数
+    const countQuery = `SELECT COUNT(*) AS total FROM videos ${whereClause}`;
+    const countResult = await db.query(countQuery, params);
+    const total = countResult[0]?.total || 0;
+
+    // 2️⃣ 查询分页数据
+    const dataQuery = `
+      SELECT * FROM videos 
+      ${whereClause} 
+      ORDER BY id DESC 
+      LIMIT ${pageSize} OFFSET ${offset}
+    `; // LIMIT / OFFSET 直接拼数字，避免占位符错误
+    const dataResult = await db.query(dataQuery, params);
+
+  
+
+  // 分页信息
+    const pagination = {
+     total,
+        page,
+        pageSize,
+    };
+
+    res.success(dataResult, "获取视频列表成功", 200, { pagination });
+
   } catch (error) {
     next(error);
   }
 };
+
+
+
+// 随机获取推荐视频
+exports.getRandomVideo=async(req,res,next)=>{
+  try {
+    // 从查询参数获取数量，默认为1
+    const count = parseInt(req.query.count) || 1;
+    
+    // 参数验证，确保是正整数且不超过合理范围
+    if (isNaN(count) || count <= 0 || count > 100) {
+      return res.fail('数量参数必须是1-100之间的正整数', 400);
+    }
+    
+    // 使用模板字符串直接插入LIMIT值，避免参数绑定问题
+    const videos = await db.query(`SELECT * FROM videos ORDER BY RAND() LIMIT ${count}`);
+    
+    if (!videos || videos.length === 0) {
+      return res.fail('没有视频可用', 404);
+    }
+    
+    res.success(videos, '获取随机视频成功');
+  } catch (error) {
+    next(error);
+  }
+}
+
+
+
+
+
+
 
 /**
  * 根据ID获取视频详情
@@ -580,6 +651,29 @@ exports.handleVideoMergeChunks = async (req, res) => {
       "INSERT INTO videos (title, description, category, category_id, video_url, cover_url) VALUES (?, ?, ?, ?, ?, ?)",
       [title, description || '', categoryRow.name, categoryId, videoUrl, coverUrl]
     );
+
+    // 清理uploads目录中可能存在的相关临时文件
+    try {
+      if (fs.existsSync(UPLOAD_DIR)) {
+        const files = fs.readdirSync(UPLOAD_DIR);
+        const cleanedFiles = [];
+        
+        for (const file of files) {
+          // 查找与当前上传相关的分片文件
+          if (file.includes('part') || file.includes(fileKey.split('/').pop())) {
+            const filePath = path.join(UPLOAD_DIR, file);
+            fs.unlinkSync(filePath);
+            cleanedFiles.push(file);
+          }
+        }
+        
+        if (cleanedFiles.length > 0) {
+          console.log(`✅ 清理uploads目录中的临时文件: ${cleanedFiles.length} 个文件被删除`);
+        }
+      }
+    } catch (cleanupError) {
+      console.error('清理uploads目录临时文件失败:', cleanupError);
+    }
 
     const [newVideo] = await db.query("SELECT * FROM videos WHERE id = ?", [result.insertId]);
     res.success(newVideo, "视频上传成功");
