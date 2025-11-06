@@ -4,9 +4,9 @@
  * 实现与testTebi.js一致的逻辑
  */
 
-const { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, GetObjectCommand, 
-        CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand,
-        ListPartsCommand, ListMultipartUploadsCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, GetObjectCommand,
+  CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand,
+  ListPartsCommand, ListMultipartUploadsCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { NodeHttpHandler } = require("@aws-sdk/node-http-handler");
 const tebiConfig = require('../config/tebiConfig');
@@ -63,7 +63,7 @@ async function uploadToTebi(data, filename, contentType, isStream = false, fileS
     if (!filename.startsWith(tebiConfig.filePrefix)) {
       fileKey = `${tebiConfig.filePrefix}${filename}`;
     }
-    
+
     console.log('准备上传到Tebi:', {
       bucket: tebiConfig.bucketName,
       key: fileKey,
@@ -71,7 +71,7 @@ async function uploadToTebi(data, filename, contentType, isStream = false, fileS
       isStream: isStream,
       fileSize: isStream ? fileSize : (data ? data.length : 'unknown')
     });
-    
+
     // 创建上传命令
     const commandParams = {
       Bucket: tebiConfig.bucketName,
@@ -80,28 +80,28 @@ async function uploadToTebi(data, filename, contentType, isStream = false, fileS
       ContentType: contentType,
       ACL: 'public-read' // 设置对象公开可读
     };
-    
+
     // 如果是流式上传，必须提供Content-Length
     if (isStream && fileSize !== null) {
       commandParams.ContentLength = fileSize;
     }
-    
+
     const command = new PutObjectCommand(commandParams);
-    
+
     // 执行上传
     await s3Client.send(command);
     console.log('✅ 上传成功:', fileKey);
-    
+
     // 生成自定义域名的公开访问URL
     const publicUrl = `${tebiConfig.customDomain}/${fileKey}`;
-    
+
     // 生成预签名URL（可选，用于临时访问）
     const getCommand = new GetObjectCommand({
       Bucket: tebiConfig.bucketName,
       Key: fileKey
     });
     const presignedUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
-    
+
     return {
       success: true,
       fileKey: fileKey,
@@ -132,17 +132,17 @@ async function initiateMultipartUpload(filename, contentType) {
     if (!filename.startsWith(tebiConfig.filePrefix)) {
       fileKey = `${tebiConfig.filePrefix}${filename}`;
     }
-    
+
     const command = new CreateMultipartUploadCommand({
       Bucket: tebiConfig.bucketName,
       Key: fileKey,
       ContentType: contentType,
       ACL: 'public-read'
     });
-    
+
     const response = await s3Client.send(command);
     console.log('分段上传初始化成功:', response.UploadId);
-    
+
     return {
       success: true,
       uploadId: response.UploadId,
@@ -217,20 +217,20 @@ async function completeMultipartUpload(fileKey, uploadId, parts) {
         Parts: parts
       }
     });
-    
+
     await s3Client.send(command);
     console.log('分段上传完成:', fileKey);
-    
+
     // 生成自定义域名的公开访问URL
     const publicUrl = `${tebiConfig.customDomain}/${fileKey}`;
-    
+
     // 生成预签名URL（可选，用于临时访问）
     const getCommand = new GetObjectCommand({
       Bucket: tebiConfig.bucketName,
       Key: fileKey
     });
     const presignedUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
-    
+
     return {
       success: true,
       fileKey: fileKey,
@@ -260,10 +260,10 @@ async function abortMultipartUpload(fileKey, uploadId) {
       Key: fileKey,
       UploadId: uploadId
     });
-    
+
     await s3Client.send(command);
     console.log('分段上传已中止:', fileKey);
-    
+
     return {
       success: true
     };
@@ -287,42 +287,42 @@ async function abortMultipartUpload(fileKey, uploadId) {
 async function uploadLargeFile(chunks, filename, contentType, progressCallback = null) {
   try {
     console.log(`开始上传大文件: ${filename}, 共${chunks.length}个分片`);
-    
+
     // 初始化分段上传
     const initResult = await initiateMultipartUpload(filename, contentType);
     if (!initResult.success) {
       console.error('初始化分段上传失败:', initResult.error);
       return initResult;
     }
-    
+
     const { uploadId, fileKey } = initResult;
     const uploadedParts = [];
     const totalChunks = chunks.length;
-    
+
     // 设置并行上传的最大数量 - 增加到10以提高上传速度
     const MAX_CONCURRENT_UPLOADS = 10;
     let activeUploads = 0;
     let nextChunkIndex = 0;
     let failedUpload = false;
     let failureReason = null;
-    
+
     // 创建一个Promise来处理所有上传
     return new Promise(async (resolve) => {
       // 上传下一个分片的函数
       const uploadNextChunk = async () => {
         if (failedUpload) return;
-        
+
         const currentIndex = nextChunkIndex++;
         if (currentIndex >= totalChunks) return;
-        
+
         activeUploads++;
         const partNumber = currentIndex + 1; // 分段编号从1开始
         const chunk = chunks[currentIndex];
-        
+
         try {
           console.log(`上传分片 ${partNumber}/${totalChunks}`);
           const partResult = await uploadPart(fileKey, uploadId, partNumber, chunk);
-          
+
           if (!partResult.success) {
             console.error(`分片 ${partNumber} 上传失败:`, partResult.error);
             failedUpload = true;
@@ -331,18 +331,18 @@ async function uploadLargeFile(chunks, filename, contentType, progressCallback =
             resolve(partResult);
             return;
           }
-          
+
           uploadedParts.push({
             ETag: partResult.ETag,
             PartNumber: partResult.PartNumber
           });
-          
+
           // 更新进度
           if (progressCallback) {
             const progress = Math.floor(uploadedParts.length / totalChunks * 100);
             progressCallback(progress);
           }
-          
+
           console.log(`分片 ${partNumber} 上传成功, 进度: ${uploadedParts.length}/${totalChunks}`);
         } catch (error) {
           console.error(`分片 ${partNumber} 上传出错:`, error);
@@ -356,10 +356,10 @@ async function uploadLargeFile(chunks, filename, contentType, progressCallback =
           return;
         } finally {
           activeUploads--;
-          
+
           // 启动下一个上传
           uploadNextChunk();
-          
+
           // 检查是否所有分片都已上传
           if (activeUploads === 0 && nextChunkIndex >= totalChunks && !failedUpload) {
             try {
@@ -377,7 +377,7 @@ async function uploadLargeFile(chunks, filename, contentType, progressCallback =
           }
         }
       };
-      
+
       // 启动初始的并行上传
       for (let i = 0; i < Math.min(MAX_CONCURRENT_UPLOADS, totalChunks); i++) {
         uploadNextChunk();
@@ -399,7 +399,7 @@ module.exports = {
   completeMultipartUpload,
   abortMultipartUpload,
   uploadLargeFile,
-  getPresignedUrl: async function(fileKey, expires = Math.floor(tebiConfig.expires / 1000)) {
+  getPresignedUrl: async function (fileKey, expires = Math.floor(tebiConfig.expires / 1000)) {
     try {
       const command = new GetObjectCommand({
         Bucket: tebiConfig.bucketName,
@@ -413,50 +413,50 @@ module.exports = {
       throw error;
     }
   },
-  getPublicUrl: function(fileKey) {
+  getPublicUrl: function (fileKey) {
     return `${tebiConfig.customDomain}/${fileKey}`;
   },
-  getPublicBaseUrl: function() {
+  getPublicBaseUrl: function () {
     return tebiConfig.customDomain;
   },
-  deleteFromTebi: async function(fileKey) {
+  deleteFromTebi: async function (fileKey) {
     try {
       console.log(`📤 开始执行文件删除操作`);
       console.log(`删除参数: fileKey='${fileKey}', bucket='${tebiConfig.bucketName}'`);
-      
+
       if (!fileKey || typeof fileKey !== 'string' || fileKey.trim() === '') {
         const errorMsg = '无效的文件键参数';
         console.error(`❌ 删除失败: ${errorMsg}`);
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: errorMsg,
           details: { fileKey, bucket: tebiConfig.bucketName }
         };
       }
-      
+
       if (!tebiConfig.bucketName) {
         const errorMsg = '未配置存储桶名称';
         console.error(`❌ 删除失败: ${errorMsg}`);
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: errorMsg,
           details: { fileKey, bucket: tebiConfig.bucketName }
         };
       }
-      
+
       const command = new DeleteObjectCommand({
         Bucket: tebiConfig.bucketName,
         Key: fileKey.trim()
       });
-      
+
       console.log(`📝 准备发送删除命令到S3客户端`);
-      
+
       const response = await s3Client.send(command);
       console.log(`✅ 删除命令执行成功，响应:`, response);
       console.log(`🗑️ 已成功删除Tebi文件: ${fileKey}`);
-      
-      return { 
-        success: true, 
+
+      return {
+        success: true,
         response,
         fileKey,
         bucket: tebiConfig.bucketName
@@ -464,7 +464,7 @@ module.exports = {
     } catch (error) {
       console.error(`❌ 删除Tebi文件失败: ${error.message}`);
       console.error('错误详情:', error);
-      
+
       const errorDetails = {
         message: error.message,
         code: error.code || 'Unknown',
@@ -474,16 +474,16 @@ module.exports = {
         fileKey,
         bucket: tebiConfig.bucketName
       };
-      
-      return { 
-        success: false, 
+
+      return {
+        success: false,
         error: error.message,
         details: errorDetails,
         originalError: error
       };
     }
   },
-  listFiles: async function(prefix = '') {
+  listFiles: async function (prefix = '') {
     try {
       const command = new ListObjectsV2Command({
         Bucket: tebiConfig.bucketName,
@@ -503,14 +503,14 @@ module.exports = {
    * @param {string} uploadId - 上传ID
    * @returns {Promise<Object>} 包含已上传分片信息的对象
    */
-  listUploadedParts: async function(fileKey, uploadId) {
+  listUploadedParts: async function (fileKey, uploadId) {
     try {
       const command = new ListPartsCommand({
         Bucket: tebiConfig.bucketName,
         Key: fileKey,
         UploadId: uploadId
       });
-      
+
       const response = await s3Client.send(command);
       const uploadedParts = (response.Parts || []).map(part => ({
         PartNumber: part.PartNumber,
@@ -518,7 +518,7 @@ module.exports = {
         Size: part.Size,
         LastModified: part.LastModified
       }));
-      
+
       console.log(`查询到已上传的分片: ${uploadedParts.length} 个`);
       return {
         success: true,
@@ -539,20 +539,20 @@ module.exports = {
    * @param {string} prefix - 文件前缀（可选）
    * @returns {Promise<Object>} 包含未完成上传列表的对象
    */
-  listMultipartUploads: async function(prefix = '') {
+  listMultipartUploads: async function (prefix = '') {
     try {
       const command = new ListMultipartUploadsCommand({
         Bucket: tebiConfig.bucketName,
         Prefix: prefix
       });
-      
+
       const response = await s3Client.send(command);
       const uploads = (response.Uploads || []).map(upload => ({
         Key: upload.Key,
         UploadId: upload.UploadId,
         Initiated: upload.Initiated
       }));
-      
+
       console.log(`查询到未完成的上传: ${uploads.length} 个`);
       return {
         success: true,
@@ -571,17 +571,17 @@ module.exports = {
    * 清理未完成的分段上传（导出供外部使用）
    */
   abortMultipartUpload: abortMultipartUpload,
-  
+
   /**
    * 清理Bucket中所有未完成的multipart uploads
    * @returns {Promise<Object>} 清理结果
    */
-  cleanupMultipartUploads: async function() {
+  cleanupMultipartUploads: async function () {
     try {
       console.log('🔄 开始清理未完成的multipart uploads...');
-      
+
       const listResult = await this.listMultipartUploads();
-      
+
       if (!listResult.success) {
         console.error('❌ 获取未完成上传列表失败:', listResult.error);
         return {
@@ -590,9 +590,9 @@ module.exports = {
           abortedCount: 0
         };
       }
-      
+
       const uploads = listResult.uploads || [];
-      
+
       if (uploads.length === 0) {
         console.log('✅ 没有未完成的multipart uploads需要清理');
         return {
@@ -601,17 +601,17 @@ module.exports = {
           message: '没有未完成的上传'
         };
       }
-      
+
       console.log(`⚠️ 发现 ${uploads.length} 个未完成的multipart uploads，正在清理...`);
-      
+
       let abortedCount = 0;
       const errors = [];
-      
+
       // 逐个中止未完成的上传
       for (const upload of uploads) {
         try {
           const result = await this.abortMultipartUpload(upload.Key, upload.UploadId);
-          
+
           if (result.success) {
             console.log(`🗑️ 已成功中止: Key=${upload.Key}, UploadId=${upload.UploadId}`);
             abortedCount++;
@@ -626,9 +626,9 @@ module.exports = {
           errors.push(errorMsg);
         }
       }
-      
+
       console.log(`✅ 清理完成。已中止 ${abortedCount}/${uploads.length} 个未完成上传。${errors.length > 0 ? `有 ${errors.length} 个上传清理失败。` : ''}`);
-      
+
       return {
         success: true,
         abortedCount: abortedCount,
