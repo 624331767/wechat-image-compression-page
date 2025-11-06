@@ -1,10 +1,11 @@
-// tebi.js
 const {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
-  ListObjectsV2Command
+  ListObjectsV2Command,
+  ListMultipartUploadsCommand,
+  AbortMultipartUploadCommand
 } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const fs = require('fs');
@@ -15,8 +16,8 @@ const fs = require('fs');
 const TEBI_REGION = 'global';
 const TEBI_BUCKET = 'oss.setwhat.dpdns.org'; // Bucket 名称
 const TEBI_ENDPOINT = 'https://oss.setwhat.dpdns.org'; // 自定义域名
-const TEBI_ACCESS_KEY = 'SIhY0h5n72xUeNCe';
-const TEBI_SECRET_KEY = '8JttUb1xeqRPo77GOLtgZGQ7nfueyu0gLRBs0vbJ';
+const TEBI_ACCESS_KEY = '2xw4VeePdt9eiZV3';
+const TEBI_SECRET_KEY = '161bOZZoZhYNBCD02aHjrtOOIaEwec7Nt3SkNCBN';
 
 // 初始化客户端
 const s3 = new S3Client({
@@ -26,7 +27,7 @@ const s3 = new S3Client({
     accessKeyId: TEBI_ACCESS_KEY,
     secretAccessKey: TEBI_SECRET_KEY
   },
-  forcePathStyle: true // 上传时使用路径风格
+  forcePathStyle: true
 });
 
 // ===============================
@@ -39,10 +40,9 @@ async function uploadFile(localPath, remotePath) {
     Key: remotePath,
     Body: fileContent,
     ContentType: 'application/octet-stream',
-    ACL: 'public-read' // 🔑 设置对象公开可读
+    ACL: 'public-read'
   }));
   console.log(`✅ 上传成功: ${remotePath}`);
-  // 返回自定义域名公开访问 URL
   return `${TEBI_ENDPOINT}/${remotePath}`;
 }
 
@@ -85,20 +85,52 @@ async function listFiles(prefix = '') {
 }
 
 // ===============================
+// 🟢 清理 Bucket 中所有未完成的 multipart uploads
+// ===============================
+async function cleanupMultipartUploads() {
+  const listCommand = new ListMultipartUploadsCommand({
+    Bucket: TEBI_BUCKET
+  });
+
+  const response = await s3.send(listCommand);
+  const uploads = response.Uploads || [];
+
+  if (uploads.length === 0) {
+    console.log('✅ 没有未完成的 multipart uploads');
+    return;
+  }
+
+  console.log(`⚠️ 发现 ${uploads.length} 个未完成的 multipart uploads，正在清理...`);
+
+  for (const up of uploads) {
+    try {
+      await s3.send(new AbortMultipartUploadCommand({
+        Bucket: TEBI_BUCKET,
+        Key: up.Key,
+        UploadId: up.UploadId
+      }));
+      console.log(`🗑️ 已中止: Key=${up.Key}, UploadId=${up.UploadId}`);
+    } catch (err) {
+      console.error(`❌ 中止失败: Key=${up.Key}, UploadId=${up.UploadId}`, err);
+    }
+  }
+  console.log('✅ 清理完成');
+}
+
+// ===============================
 // 🧪 示例测试
 // ===============================
 (async () => {
   const publicUrl = await uploadFile('./test.png', 'images/test.png');
   console.log('🌐 公共访问 URL:', publicUrl);
 
-  // 可选：获取临时签名 URL
   await getFileUrl('images/test.png');
 
-  // 列出文件
   await listFiles('images/');
 
-  // 删除文件（10 秒后示例）
-  // setTimeout(async () => {
-  //   await deleteFile('images/test.png');
-  // }, 10000);
+  // 删除文件示例
+  // await deleteFile('images/test.png');
+
+  // 清理未完成 multipart uploads
+  await cleanupMultipartUploads();
 })();

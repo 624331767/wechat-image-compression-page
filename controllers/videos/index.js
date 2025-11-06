@@ -14,7 +14,8 @@ const {
   abortMultipartUpload,
   listUploadedParts,
   getPublicUrl,
-  listMultipartUploads
+  listMultipartUploads,
+  deleteFromTebi
 } = require('../../utils/tebiStorage');
 
 // ========================= 基础目录配置 ========================= //
@@ -374,13 +375,37 @@ exports.deleteVideo = async (req, res, next) => {
       return res.fail('视频不存在', 404);
     }
 
+    // 从Tebi存储中删除视频文件和封面文件
+    // 视频文件路径处理
+    if (video.video_url) {
+      try {
+        // 从URL中提取文件路径，去掉域名部分
+        const videoPath = video.video_url.replace(/^https?:\/\/(www\.)?[^\/]+\//, '');
+        console.log(`正在删除Tebi中的视频文件: ${videoPath}`);
+        await deleteFromTebi(videoPath);
+      } catch (err) {
+        console.error('删除Tebi视频文件失败:', err);
+        // 继续执行，不中断整个删除流程
+      }
+    }
+
+    // 封面文件路径处理
+    if (video.cover_url) {
+      try {
+        // 从URL中提取文件路径，去掉域名部分
+        const coverPath = video.cover_url.replace(/^https?:\/\/(www\.)?[^\/]+\//, '');
+        console.log(`正在删除Tebi中的封面文件: ${coverPath}`);
+        await deleteFromTebi(coverPath);
+      } catch (err) {
+        console.error('删除Tebi封面文件失败:', err);
+        // 继续执行，不中断整个删除流程
+      }
+    }
+
     // 删除视频记录
     await db.query('DELETE FROM videos WHERE id = ?', [id]);
 
-    // 可选：删除文件系统中的视频文件和封面文件
-    // 这里可以根据需要添加文件删除逻辑
-
-    res.success(null, '视频删除成功');
+    res.success(null, '视频删除成功，相关文件已从Tebi存储中移除');
   } catch (error) {
     next(error);
   }
@@ -528,10 +553,10 @@ exports.handleVideoChunkUpload = async (req, res) => {
       const existingPart = partsResult.uploadedParts.find(p => p.PartNumber === partNumber);
       
       if (existingPart) {
-        // 删除临时文件
-        if (fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
-        }
+        // 异步删除临时文件
+      if (fs.existsSync(file.path)) {
+        await fs.promises.unlink(file.path);
+      }
         
         return res.success({ 
           chunkIndex, 
@@ -542,11 +567,11 @@ exports.handleVideoChunkUpload = async (req, res) => {
       }
     }
 
-    // 读取分片内容
-    const chunkBuffer = fs.readFileSync(file.path);
+    // 异步读取分片内容，避免阻塞事件循环
+    const chunkBuffer = await fs.promises.readFile(file.path);
     
-    // 删除临时文件
-    fs.unlinkSync(file.path);
+    // 异步删除临时文件
+      await fs.promises.unlink(file.path);
 
     // 上传分片到Tebi（PartNumber从1开始）
     const partNumber = parseInt(chunkIndex) + 1;
@@ -564,14 +589,14 @@ exports.handleVideoChunkUpload = async (req, res) => {
     }, `分片 ${chunkIndex} 上传到Tebi成功`);
   } catch (error) {
     console.error('分片上传失败:', error);
-    // 清理临时文件
-    if (req.file && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (e) {
-        console.error('清理临时文件失败:', e);
+    // 异步清理临时文件
+      if (req.file && fs.existsSync(req.file.path)) {
+        try {
+          await fs.promises.unlink(req.file.path);
+        } catch (e) {
+          console.error('清理临时文件失败:', e);
+        }
       }
-    }
     res.fail(`上传失败: ${error.message}`, 500);
   }
 };
@@ -632,12 +657,12 @@ exports.handleVideoMergeChunks = async (req, res) => {
     if (coverFileObj) {
       // 上传封面到Tebi
       const { uploadToTebi } = require('../../utils/tebiStorage');
-      const coverBuffer = fs.readFileSync(coverFileObj.path);
+      const coverBuffer = await fs.promises.readFile(coverFileObj.path);
       const coverFileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(coverFileObj.originalname)}`;
       const coverUploadResult = await uploadToTebi(coverBuffer, `covers/${coverFileName}`, coverFileObj.mimetype);
       
-      // 清理临时文件
-      fs.unlinkSync(coverFileObj.path);
+      // 异步清理临时文件
+      await fs.promises.unlink(coverFileObj.path);
       
       if (coverUploadResult.success) {
         coverUrl = coverUploadResult.url;
@@ -658,14 +683,21 @@ exports.handleVideoMergeChunks = async (req, res) => {
         const files = fs.readdirSync(UPLOAD_DIR);
         const cleanedFiles = [];
         
+        // 使用并行删除提高效率
+        const deletePromises = [];
         for (const file of files) {
           // 查找与当前上传相关的分片文件
           if (file.includes('part') || file.includes(fileKey.split('/').pop())) {
             const filePath = path.join(UPLOAD_DIR, file);
-            fs.unlinkSync(filePath);
-            cleanedFiles.push(file);
+            deletePromises.push(fs.promises.unlink(filePath).then(() => {
+              cleanedFiles.push(file);
+            }).catch(err => {
+              console.error(`删除文件失败 ${filePath}:`, err);
+            }));
           }
         }
+        // 等待所有删除操作完成
+        await Promise.all(deletePromises);
         
         if (cleanedFiles.length > 0) {
           console.log(`✅ 清理uploads目录中的临时文件: ${cleanedFiles.length} 个文件被删除`);
@@ -679,14 +711,14 @@ exports.handleVideoMergeChunks = async (req, res) => {
     res.success(newVideo, "视频上传成功");
   } catch (error) {
     console.error('完成上传失败:', error);
-    // 清理临时文件
-    if (req.file && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (e) {
-        console.error('清理临时文件失败:', e);
+    // 异步清理临时文件
+      if (req.file && fs.existsSync(req.file.path)) {
+        try {
+          await fs.promises.unlink(req.file.path);
+        } catch (e) {
+          console.error('清理临时文件失败:', e);
+        }
       }
-    }
     res.fail(`完成上传失败: ${error.message}`, 500);
   }
 };

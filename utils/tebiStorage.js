@@ -32,9 +32,18 @@ const s3Client = new S3Client({
   connectTimeout: 60000,   // 连接超时：1分钟
   maxAttempts: 5,
   retryMode: 'standard',
+  // 优化连接设置
+  maxSockets: 30,          // 增加最大套接字数
+  maxRedirects: 3,
   requestHandler: new NodeHttpHandler({
-    connectionTimeout: 60000, // 60s 连接超时
-    socketTimeout: 120000     // 120s socket超时
+    connectionTimeout: 60000,   // 60s 连接超时
+    socketTimeout: 120000,      // 120s socket超时
+    maxSockets: 30,             // 每个主机的最大套接字数
+    // 启用TCP保持连接
+    socketOptions: {
+      keepAlive: true,
+      keepAliveInitialDelay: 10000 // 10秒后开始保持连接
+    }
   })
 });
 
@@ -290,8 +299,8 @@ async function uploadLargeFile(chunks, filename, contentType, progressCallback =
     const uploadedParts = [];
     const totalChunks = chunks.length;
     
-    // 设置并行上传的最大数量
-    const MAX_CONCURRENT_UPLOADS = 3;
+    // 设置并行上传的最大数量 - 增加到10以提高上传速度
+    const MAX_CONCURRENT_UPLOADS = 10;
     let activeUploads = 0;
     let nextChunkIndex = 0;
     let failedUpload = false;
@@ -561,5 +570,79 @@ module.exports = {
   /**
    * 清理未完成的分段上传（导出供外部使用）
    */
-  abortMultipartUpload: abortMultipartUpload
+  abortMultipartUpload: abortMultipartUpload,
+  
+  /**
+   * 清理Bucket中所有未完成的multipart uploads
+   * @returns {Promise<Object>} 清理结果
+   */
+  cleanupMultipartUploads: async function() {
+    try {
+      console.log('🔄 开始清理未完成的multipart uploads...');
+      
+      const listResult = await this.listMultipartUploads();
+      
+      if (!listResult.success) {
+        console.error('❌ 获取未完成上传列表失败:', listResult.error);
+        return {
+          success: false,
+          error: listResult.error,
+          abortedCount: 0
+        };
+      }
+      
+      const uploads = listResult.uploads || [];
+      
+      if (uploads.length === 0) {
+        console.log('✅ 没有未完成的multipart uploads需要清理');
+        return {
+          success: true,
+          abortedCount: 0,
+          message: '没有未完成的上传'
+        };
+      }
+      
+      console.log(`⚠️ 发现 ${uploads.length} 个未完成的multipart uploads，正在清理...`);
+      
+      let abortedCount = 0;
+      const errors = [];
+      
+      // 逐个中止未完成的上传
+      for (const upload of uploads) {
+        try {
+          const result = await this.abortMultipartUpload(upload.Key, upload.UploadId);
+          
+          if (result.success) {
+            console.log(`🗑️ 已成功中止: Key=${upload.Key}, UploadId=${upload.UploadId}`);
+            abortedCount++;
+          } else {
+            const errorMsg = `中止失败: Key=${upload.Key}, UploadId=${upload.UploadId}, 错误: ${result.error}`;
+            console.error(`❌ ${errorMsg}`);
+            errors.push(errorMsg);
+          }
+        } catch (err) {
+          const errorMsg = `处理上传时出错: Key=${upload.Key}, UploadId=${upload.UploadId}, 错误: ${err.message}`;
+          console.error(`❌ ${errorMsg}`);
+          errors.push(errorMsg);
+        }
+      }
+      
+      console.log(`✅ 清理完成。已中止 ${abortedCount}/${uploads.length} 个未完成上传。${errors.length > 0 ? `有 ${errors.length} 个上传清理失败。` : ''}`);
+      
+      return {
+        success: true,
+        abortedCount: abortedCount,
+        totalUploads: uploads.length,
+        errors: errors,
+        message: `成功清理 ${abortedCount}/${uploads.length} 个未完成上传`
+      };
+    } catch (error) {
+      console.error('❌ 清理multipart uploads过程中发生错误:', error);
+      return {
+        success: false,
+        error: error.message,
+        abortedCount: 0
+      };
+    }
+  }
 };

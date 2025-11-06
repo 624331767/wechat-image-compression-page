@@ -1,0 +1,277 @@
+<html>
+	<head>
+		<meta
+		  name="viewport"
+		  content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, viewport-fit=cover"
+		/>
+		<script type="text/javascript" src="js/hls.min.js"></script>
+		<script type="text/javascript" src="js/flv.min.js"></script>
+		<script type="text/javascript" src="js/jsmpeg.min.js"></script>
+		<script type="text/javascript" src="js/three.min.js"></script>
+		<script type="text/javascript" src="js/OrbitControls.js"></script>
+		<script type="text/javascript" src="js/DeviceOrientationControls.js"></script>
+		<script type="text/javascript" src="js/yb-player-gesture.js"></script>
+		<script type="text/javascript" src="js/yb-player-subtitle.js"></script>
+		<script type="text/javascript" src="js/yb-player-danmu.js"></script>
+		<script type="text/javascript" src="js/yb-player-pano.js"></script>
+		<script type="text/javascript" src="js/yb-player-mpeg.js"></script>
+		<script type="text/javascript" src="js/yb-player.js"></script>
+		<script type="text/javascript" src="js/uni-webview-js@1.5.4.js"></script>
+		
+		<link rel="stylesheet" type="text/css" href="css/yb-player.css"/>
+		<link rel="stylesheet" type="text/css" href="css/yb-player-plugin.css"/>
+		<title>全局播放器</title>
+		<style>
+			html, body {
+				padding: 0;
+				margin: 0;
+				background-color: #000;
+				width: 100vw;
+				height: 100vh;
+			}
+			.btns {
+				position: fixed;
+				top: 50%;
+				left: 50%;
+				transform: translate(-50%, -50%);
+				display: none;
+				flex-direction: row;
+			}
+			.yb-player {
+				width: 100%;
+				height: 100%;
+			}
+		</style>
+	</head>
+	<body>
+		<!-- Specify the player container -->
+		<div id="yb-player" class="yb-player">
+		</div>
+		<script>
+			var mp
+			//加载视频
+			function reloadVideo (arg) {
+				var params = parseArg(arg)
+				unload()
+				_traverseObject(params.custom, 'slotclick')
+				mp = new YbPlayer({
+					container:'#yb-player',
+					src: params.src,
+					segments: params.segments,
+					title: params.title,
+					poster: params.poster || undefined,
+					type: params.type,
+					three: params.three,
+					initialTime: params.initialTime,
+					duration: params.duration,
+					autoplay: params.autoplay,
+					preload: params.preload,
+					muted: params.muted,
+					playbackRate: params.playbackRate,
+					loop: params.loop,
+					isLive: params.isLive,
+					header: params.header,
+					controls: params.controls,
+					height: '100%',
+					objectFit: params.objectFit,
+					crossOrigin: params.crossOrigin,
+					openDirection: params.openDirection,
+					exitDirection: params.exitDirection,
+					quality: params.quality,
+					works: params.works,
+					workIndex: params.workIndex,
+					subtitles: params.subtitles,
+					subtitleIndex: params.subtitleIndex,
+					custom: params.custom,
+					decoder: {
+						hls: {
+							loader: Hls,
+							config: parseHlsConfig(params.hlsConfig)
+						},
+						flv: {
+							loader: flvjs,
+							config: params.flvConfig
+						},
+						jsmpeg: {
+							loader: JSMpeg,
+							config: params.jsmpegConfig
+						}
+					}
+				})
+				mp.load()
+				mp.loadVideo()
+				mp.loadGestureEvent()
+				window.addEventListener('resize', updateSize)
+			}
+			function updateSize () {
+				mp?.refreshDanmu()
+				mp?.refreshPano()
+			}
+			//动态修改video属性
+			function setVideo (key, value) {
+				mp?.setVideo(key, value)
+			}
+			//加载弹幕
+			function loadDanmu () {
+				if ( mp ) {
+					if ( window.danmu && window.danmu.length ) mp.setConfig('danmu', window.danmu)
+					mp.unloadDanmu()
+					mp.loadDanmu()
+					window.dammu = null
+				}
+			}
+			//卸载弹幕
+			function unloadDanmu () {
+				mp?.unloadDanmu()
+			}
+			//发送弹幕
+			function sendDanmu (arg, border) {
+				var danmu = parseArg(arg)
+				mp?.sendDanmu(danmu, border)
+			}
+			//插入弹幕
+			function insertDanmu (arg) {
+				var danmu = parseArg(arg)
+				mp?.insertDanmu(danmu)
+			}
+			//更新配置
+			function updateConfig (arg) {
+				var config = parseArg(arg)
+				Object.keys(config).forEach(key => {
+					mp?.setConfig(key, config[key])
+				})
+				mp?.hideControls()
+			}
+			//重加载自定义配置
+			function reloadCustom (arg) {
+				var config = parseArg(arg)
+				_traverseObject(config, 'slotclick')
+				Object.keys(config).forEach(key => {
+					mp?.setCustom(key, config[key])
+				})
+				mp?.unloadCustom()
+				mp?.loadCustom()
+			}
+			//播放/暂停
+			function toggle () {
+				mp?.toggle()
+			}
+			//播放
+			function play () {
+				mp?.video?.play()
+			}
+			//暂停
+			function pause () {
+				mp?.video?.pause()
+			}
+			//跳转
+			function seek (time) {
+				mp?.seek(time)
+			}
+			//开启全屏
+			function openFullscreen (direction) {
+				mp?.openFullscreen(direction)
+			}
+			//退出全屏
+			function exitFullscreen () {
+				mp?.exitFullscreen()
+			}
+			//消息提示
+			function showToast (arg) {
+				var data = parseArg(arg)
+				mp?.showToast(data)
+			}
+			//展示工具栏
+			function showToolbar (arg) {
+				var data = parseArg(arg)
+				_traverseObject(data, 'toolclick')
+				mp?.showToolbar(data.selector, data.list, data.checkShow, data.checkIndex)
+			}
+			//截图
+			function capture (type) {
+				mp?.capture(type)
+			}
+			//禁用手势事件
+			function disableGesture () {
+				mp?.disableGesture()
+			}
+			//启用手势事件
+			function enableGesture () {
+				mp?.enableGesture()
+			}
+			//卸载视频
+			function unload () {
+				if ( mp ) {
+					mp.unloadDanmu()
+					mp.unloadGestureEvent()
+					mp.unloadVideo()
+					mp.unload()
+					window.removeEventListener('resize', updateSize)
+				}
+			}
+			//卸载视频
+			function destroy () {
+				unload()
+				YbPlayer.postMessage({destroyed: true})
+			}
+			//处理custom
+			function _traverseObject(obj, emitname) {
+                if (typeof obj !== 'object' || obj === null) {
+                    return;
+                }
+                for (const key in obj) {
+                    if (obj.hasOwnProperty(key)) {
+                        const value = obj[key];
+                        if (key == 'click') {
+							var emit = {}
+							emit[emitname] = value
+							obj[key] = function () { YbPlayer.postMessage(emit) }//点击事件通知
+                        } else if (typeof value === 'object' && value !== null) {
+                            _traverseObject(value, emitname);
+                        }
+                    }
+                }
+            }
+			//处理hlsConfig
+			function parseHlsConfig (config = {}) {
+				Object.keys(config).forEach(key => {
+					if ( ['xhrSetup'].includes(key) ) {
+						config[key] = eval(`(${config[key]})`);
+					}
+					if ( ['pLoader', 'fLoader'].includes(key) ) {
+						config[key] = (new Function(`return ${config[key]}`))();
+					}
+				})
+				return config
+			}
+			//设置弹幕数据（webview专用）
+			function setDanmuData (arg) {
+				var { code, data } = parseArg(arg)
+				if ( !window.danmu ) window.danmu = []
+				window.danmu = window.danmu.concat(data)
+				if ( code == 1 ) loadDanmu()
+			}
+			//转义参数
+			function parseArg (arg) {
+				try{
+					return JSON.parse(decodeURIComponent(decodeURIComponent(arg)))
+				}catch(e){
+					return arg
+				} 
+			}
+			
+			//通知app已经做好准备
+			function ready () {
+				YbPlayer.postMessage({ready: true})
+			}
+			
+			if (document.readyState === 'complete') {
+			    // 如果页面已经加载完成，直接执行函数
+			    ready();
+			} else {
+			    window.addEventListener('load', ready)
+			}
+			
+		</script>
+	</body>
+</html>

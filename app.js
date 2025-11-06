@@ -20,6 +20,40 @@ const { responseWrapper } = require('./utils/message');
 const { startRenderKeepAlive } = require('./utils/keepalive');
 const { swaggerUi, swaggerSpec } = require('./Swagger/swagger');
 const {apiLoggerMiddleware} = require('./updateDate/newData');
+const tebiStorage = require('./utils/tebiStorage');
+
+/**
+ * 启动Tebi存储未完成上传清理的定时任务
+ * 每2小时执行一次cleanupMultipartUploads
+ */
+function startMultipartUploadCleanup() {
+  const INTERVAL_HOURS = 2;
+  const INTERVAL_MS = INTERVAL_HOURS * 60 * 60 * 1000;
+  
+  // 立即执行一次初始清理
+  (async () => {
+    try {
+      console.log(`⏰ 初始化清理Tebi存储中未完成的multipart uploads...`);
+      const result = await tebiStorage.cleanupMultipartUploads();
+      console.log(`✅ 初始化清理完成:`, result);
+    } catch (error) {
+      console.error(`❌ 初始化清理multipart uploads失败:`, error);
+    }
+  })();
+  
+  // 设置定时任务
+  setInterval(async () => {
+    try {
+      console.log(`⏰ 定时执行Tebi存储未完成multipart uploads清理...`);
+      const result = await tebiStorage.cleanupMultipartUploads();
+      console.log(`✅ 定时清理完成:`, result);
+    } catch (error) {
+      console.error(`❌ 定时清理multipart uploads失败:`, error);
+    }
+  }, INTERVAL_MS);
+  
+  console.log(`✅ 已启动Tebi存储未完成上传清理定时任务，每${INTERVAL_HOURS}小时执行一次`);
+}
 
 // 路由模块
 const imageRouter = require('./router/imageRouter');
@@ -85,6 +119,10 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
 // 6.1 前端构建产物
 app.use(express.static(path.join(__dirname, 'public/dist')));
 
+// 2. 新增手机网站：路径 "/mobile" 指向 public/mobile
+app.use('/mobile', express.static(path.join(__dirname, 'public/mobile')));
+ 
+
 // 6.2 上传 / 下载 / 压缩 / 图片资源
 const staticDirs = [
   { route: '/uploads', dir: 'uploads' },
@@ -131,6 +169,9 @@ app.listen(PORT, () => {
 
   // 9.1 服务启动后开始 Render 保活（每 4 分钟一次）
   startRenderKeepAlive(`${renderUrl}/api/keepalive`, 4);
-  console.log(apiLoggerMiddleware,'apiLoggerMiddleware');
   
+  // 9.2 启动Tebi存储未完成上传清理定时任务（每2小时一次）
+  startMultipartUploadCleanup();
+  
+  console.log(apiLoggerMiddleware,'apiLoggerMiddleware');
 });

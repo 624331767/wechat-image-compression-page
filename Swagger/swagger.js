@@ -36,7 +36,9 @@ const options = {
     path.join(__dirname, '../router/videosRouter/videosRouter.js'),
     path.join(__dirname, '../router/weatherRouter/weatherRouter.js'),
     path.join(__dirname, '../router/jwtTestRouter/jwtTestRouter.js'),
-      path.join(__dirname, '../router/keepaliveRouter/keepaliveRouter.js')
+    path.join(__dirname, '../router/keepaliveRouter/keepaliveRouter.js'),
+    path.join(__dirname, '../router/cloudflare/cloudflareRouter.js'),
+    path.join(__dirname, '../router/page/userRouter/userRouter.js')
   ],
 };
 
