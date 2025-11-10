@@ -505,6 +505,6 @@ function formatDateRows(rows, fields = ['created_at', 'updated_at']) {
 
 
 exports.getproxyLogsText=async (req, res) => { 
-  const countResult = await db.query(`SELECT * FROM api_call_logs`);
+  const countResult = await db.query(`SELECT * FROM api_call_logs `);
    res.success({ count: countResult.length }, "获取请求列表数据成功", 200);
 };
