@@ -238,10 +238,10 @@ exports.getRandomVideo=async(req,res,next)=>{
 
 
 
-/**
- * 根据ID获取视频详情
+ /**
+ * 根据ID获取视频详情并更新播放量
  */
- exports.getVideoById = async (req, res, next) => {
+exports.getVideoById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -253,15 +253,17 @@ exports.getRandomVideo=async(req,res,next)=>{
       return res.fail('视频不存在', 404);
     }
 
-    // 更新 count 字段，假设每访问一次加 1
-    await db.query('UPDATE videos SET count = count + 1 WHERE id = ?', [id]);
+    // 更新播放量
+    await db.query('UPDATE videos SET view_count = view_count + 1 WHERE id = ?', [id]);
 
-    // 返回视频详情
+    // 返回视频详情（播放量加 1）
+    video.view_count += 1;
     res.success(video, '获取视频详情成功');
   } catch (error) {
     next(error);
   }
 };
+
 
 /**
  * 获取所有视频（管理用）
