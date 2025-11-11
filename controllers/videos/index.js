@@ -241,15 +241,22 @@ exports.getRandomVideo=async(req,res,next)=>{
 /**
  * 根据ID获取视频详情
  */
-exports.getVideoById = async (req, res, next) => {
+ exports.getVideoById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const [video] = await db.query('SELECT * FROM videos WHERE id = ?', [id]);
+
+    // 查询视频
+    const [rows] = await db.query('SELECT * FROM videos WHERE id = ?', [id]);
+    const video = rows[0];
 
     if (!video) {
       return res.fail('视频不存在', 404);
     }
 
+    // 更新 count 字段，假设每访问一次加 1
+    await db.query('UPDATE videos SET count = count + 1 WHERE id = ?', [id]);
+
+    // 返回视频详情
     res.success(video, '获取视频详情成功');
   } catch (error) {
     next(error);
